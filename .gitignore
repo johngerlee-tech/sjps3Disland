@@ -1,0 +1,24 @@
+# 原始參考素材資料夾（網頁實際使用的圖片已整理至 assets/photos/）
+照片/
+影片/
+
+# 根目錄的原始地形圖、參考照片、除錯截圖與影片（開頭加 / 只忽略根目錄，不影響 assets/）
+/*.jpg
+/*.JPG
+/*.jpeg
+/*.png
+/*.pdf
+/*.mp4
+/*.webp
+
+# 作業系統與雲端硬碟暫存檔
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 編輯器與開發工具設定
+.vscode/
+.idea/
+*.log
+*.tmp
+node_modules/

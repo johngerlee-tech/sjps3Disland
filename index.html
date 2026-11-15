@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>雲林縣斗六市溪洲國民小學 — 3D 校園導覽平台 (階段 1 初版模型)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="appContainer">
+    <!-- 載入畫面 -->
+    <div id="loadingOverlay">
+      <div class="loading-card">
+        <img src="assets/school-logo.jpg" alt="溪洲國小校徽" class="loading-logo">
+        <h2 class="loading-title">溪洲國小 3D 校園導覽</h2>
+        <div class="loading-spinner"></div>
+        <p class="loading-sub">3D 校園載入中...</p>
+      </div>
+    </div>
+
+    <canvas id="campusCanvas" aria-label="溪洲國小 3D 校園導覽"></canvas>
+    <div id="labelsOverlay"></div>
+
+    <!-- 頂部導覽列 -->
+    <header id="topHeader">
+      <div class="brand-card glass-card">
+        <img class="school-logo-img" src="assets/school-logo.jpg" alt="溪洲國小校徽">
+        <div class="brand-text">
+          <h1 id="brandTitle">雲林縣斗六市溪洲國民小學 3D 校園導覽</h1>
+          <small id="brandSub">640 雲林縣斗六市溪洲里萬年路 809 號</small>
+        </div>
+      </div>
+
+      <div class="search-box">
+        <div class="search-input-wrap glass-card">
+          <span>🔍</span>
+          <input id="campusSearchInput" type="search" placeholder="搜尋班級、處室、森巴、生態池、香蕉園..." autocomplete="off">
+        </div>
+        <ul id="searchResults" class="glass-card" hidden></ul>
+      </div>
+
+      <div class="top-tools">
+        <button type="button" id="startTourBtn" class="pill-btn tour-btn">🚩 特色導覽</button>
+        <button type="button" id="walkModeBtn" class="pill-btn">🚶 校園漫步</button>
+        <button type="button" id="resetOverviewBtn" class="pill-btn">🏠 全校總覽</button>
+        <button type="button" id="surveyToggleBtn" class="pill-btn" title="疊加 1/800 地形測繪底圖驗證建物位置與角度">📐 測繪對位圖層</button>
+        <button type="button" id="adminBtn" class="pill-btn" title="管理者編輯照片、影片與教室配置">⚙️ 後台管理</button>
+        <button type="button" id="langToggleBtn" class="pill-btn">🌐 EN</button>
+      </div>
+    </header>
+
+    <!-- 左側分區視角與路線導航 -->
+    <aside id="zonesBox" class="glass-card">
+      <h3 id="zonesHeading">📍 校園分區視角</h3>
+      <div id="zoneList" class="zone-list"></div>
+
+      <hr class="nav-divider">
+      <h3 id="navHeading">🧭 校園路線導航</h3>
+      <div class="nav-row">
+        <select id="navStartSelect" aria-label="起點"></select>
+        <select id="navEndSelect" aria-label="終點"></select>
+      </div>
+      <div class="nav-btn-row">
+        <button type="button" id="runNavBtn" class="pill-btn active">規劃路線</button>
+        <button type="button" id="clearNavBtn" class="pill-btn">清除</button>
+      </div>
+      <div id="navInfoBox" hidden></div>
+    </aside>
+
+    <!-- 右上角動態指北針羅盤 -->
+    <div id="compassBox" class="glass-card">
+      <button type="button" id="compassResetBtn" title="點擊回正北朝上">
+        <div id="compassDial">
+          <span class="c-n">N</span>
+          <span class="c-e">E</span>
+          <span class="c-s">S</span>
+          <span class="c-w">W</span>
+          <div class="c-needle"></div>
+        </div>
+      </button>
+      <div id="compassCap" class="compass-cap">正北朝上</div>
+    </div>
+
+    <!-- 右側建築詳情與樓層配置抽屜 -->
+    <aside id="detailDrawer" class="glass-card" hidden></aside>
+
+    <!-- 校慶亮點自動巡航導覽控制條 -->
+    <div id="tourControlBar" class="glass-card" hidden>
+      <div class="tour-title-box">
+        <span id="tourStepTitle">01. 入口意象</span>
+        <small id="tourStepCounter">第 1 / 14 站</small>
+      </div>
+      <div class="tour-actions">
+        <button type="button" class="pill-btn" id="tourPrevBtn">◀ 上一站</button>
+        <button type="button" class="pill-btn active" id="tourPlayBtn">⏸ 暫停輪播</button>
+        <button type="button" class="pill-btn" id="tourNextBtn">下一站 ▶</button>
+        <button type="button" class="close-btn" id="tourCloseBtn" title="結束導覽">✕</button>
+      </div>
+    </div>
+
+    <!-- 校園漫步 HUD 控制列 -->
+    <div id="walkHudBar" class="glass-card" hidden>
+      <div class="walk-top-row">
+        <strong style="font-size:0.84rem;" id="walkTitleTxt">🚶 校園實境漫步</strong>
+        <button type="button" class="walk-chip active" id="charBoyBtn">👦 男同學</button>
+        <button type="button" class="walk-chip" id="charGirlBtn">👧 女同學</button>
+        <button type="button" class="walk-chip active" id="walkCamModeBtn">🎥 第三人稱</button>
+        <button type="button" class="walk-chip active" id="walkMinimapBtn">🗺️ 小地圖</button>
+        <button type="button" class="walk-chip" id="exitWalkBtn">🦅 返回鳥瞰</button>
+      </div>
+    </div>
+
+    <!-- 手機漫步虛擬搖桿 -->
+    <div id="walkJoystick"><div id="walkJoyKnob"></div></div>
+
+    <!-- 模擬自動帶路控制面板 (仿導航浮動條) -->
+    <div id="guideControlBar" hidden>
+      <div class="guide-bar-inner">
+        <div class="guide-info">
+          <div class="guide-route-title" id="guideRouteTitle">校門入口 → 創客藝廊</div>
+          <div class="guide-route-meta" id="guideRouteMeta">預估步行距離約 0 公尺 ・ 步行時間約 0 秒</div>
+        </div>
+        <div class="guide-actions">
+          <button type="button" class="guide-btn guide-btn-pause" id="guidePauseBtn">⏸ 暫停帶路</button>
+          <button type="button" class="guide-btn" id="guideSpeedBtn">⚡ 1x 正常</button>
+          <button type="button" class="guide-btn" id="guideTopViewBtn">🦅 垂直俯瞰</button>
+          <button type="button" class="guide-btn guide-btn-close" id="guideCloseBtn" title="結束帶路">✕</button>
+        </div>
+      </div>
+      <div class="guide-progress-track"><div class="guide-progress-fill" id="guideProgressFill"></div></div>
+    </div>
+
+    <!-- 右下角小地圖 -->
+    <div id="minimapWrap" class="glass-card" title="點擊小地圖可移動視角／人物位置">
+      <button type="button" id="minimapCloseBtn" class="minimap-close-btn" title="關閉小地圖" aria-label="關閉小地圖">✕</button>
+      <canvas id="minimapCanvas" width="176" height="140"></canvas>
+      <div class="minimap-label" id="minimapLabel">🗺️ 校園小地圖</div>
+    </div>
+
+    <!-- 後台管理編輯 Modal -->
+    <div id="adminModal" hidden>
+      <div class="admin-dialog glass-card" id="adminDialog"></div>
+    </div>
+
+    <!-- 圖片放大燈箱 -->
+    <div id="photoLightbox" hidden>
+      <img id="lightboxImg" src="" alt="實景照片放大">
+    </div>
+
+    <!-- 底部操作說明 -->
+    <footer id="campusFooter">
+      🖱️ 左鍵拖曳平移・右鍵拖曳旋轉・滾輪縮放・WASD 移動・點擊建築物查看實景照片與樓層 ｜ 👆 單指平移・雙指縮放旋轉
+    </footer>
+  </div>
+
+  <!-- Firebase 免費雲端 SDK (未啟用或離線時自動略過) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="data/firebase-config.js"></script>
+
+  <!-- 全部使用本地 JS，雙擊 index.html 即可離線開啟 -->
+  <script src="js/vendor/three.min.js"></script>
+  <script src="data/survey-ref-b64.js"></script>
+  <script src="data/school-year.js"></script>
+  <script src="data/campus-data.js"></script>
+  <script src="data/tour-data.js"></script>
+  <script src="js/buildings-3d.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
