@@ -1428,6 +1428,44 @@
   ];
 
   let fbAuth = null, fbDb = null, fbReady = false;
+  let adminAuthStatusMsg = "";
+  function verifyGoogleAdminUser(user) {
+    if (!user) return false;
+    const em = (user.email || "").toLowerCase();
+    const found = loadAdmins().find(a => a.email.toLowerCase() === em);
+    if (!found) {
+      if (fbAuth) fbAuth.signOut().catch(() => {});
+      adminAuthStatusMsg = `帳號 <strong>${em}</strong> 不在後台指定管理者名單中，請選擇其他已授權的 Google 帳號。`;
+      return false;
+    }
+    adminAuthStatusMsg = "";
+    adminAuthedUser = { name: user.displayName || found.name, email: em };
+    return true;
+  }
+  function startGoogleAdminSignIn() {
+    if (!fbReady || !fbAuth) return;
+    adminAuthStatusMsg = "正在導引至 Google 帳號認證畫面，請選擇要登入的 Google 帳號…";
+    renderAdminModal();
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    fbAuth.signInWithPopup(provider).then(res => {
+      verifyGoogleAdminUser(res.user);
+      renderAdminModal();
+    }).catch(err => {
+      if (err && (err.code === "auth/popup-blocked" || err.code === "auth/cancelled-popup-request")) {
+        fbAuth.signInWithRedirect(provider);
+        return;
+      }
+      if (err && err.code === "auth/unauthorized-domain") {
+        adminAuthStatusMsg = `目前網域 <code>${location.hostname}</code> 尚未加入 Firebase 授權網域。<br>請至 Firebase Console（<code>${window.FIREBASE_CONFIG.projectId}</code>）→ Authentication → Settings → Authorized domains 新增 <code>${location.hostname}</code>。`;
+      } else if (err && err.code === "auth/popup-closed-by-user") {
+        adminAuthStatusMsg = "您已關閉 Google 登入視窗，請點擊下方按鈕重新選擇 Google 帳號。";
+      } else {
+        adminAuthStatusMsg = `Google 登入失敗：${err ? err.message : "未知錯誤"}`;
+      }
+      renderAdminModal();
+    });
+  }
   (function initFirebase() {
     const cfg = window.FIREBASE_CONFIG;
     if (!cfg || !cfg.enabled || !cfg.apiKey || typeof firebase === "undefined") return;
@@ -1436,6 +1474,19 @@
       fbAuth = firebase.auth();
       fbDb = firebase.firestore();
       fbReady = true;
+      fbAuth.getRedirectResult().then(res => {
+        if (res && res.user) {
+          verifyGoogleAdminUser(res.user);
+          adminModal.hidden = false;
+          renderAdminModal();
+        }
+      }).catch(err => {
+        if (err && err.code) {
+          adminAuthStatusMsg = err.code === "auth/unauthorized-domain"
+            ? `目前網域 <code>${location.hostname}</code> 尚未加入 Firebase 授權網域，請至 Firebase Console → Authentication → Settings → Authorized domains 新增 <code>${location.hostname}</code>。`
+            : `Google 認證失敗：${err.message}`;
+        }
+      });
       // 啟動時從 Firestore 載入全校即時最新資料
       fbDb.collection("campus").doc("schoolYearOverrides").get().then(doc => {
         if (doc.exists && doc.data()) {
@@ -1516,8 +1567,8 @@
           <button type="button" class="close-btn" id="adminCloseBtn">✕</button>
         </div>
         ${fbReady ? `
-          <p style="font-size:0.84rem;color:#475569;margin:0 0 12px;">請使用已授權之 Google 帳號登入後台，編輯後將即時同步至全校訪客：</p>
-          <button type="button" class="pill-btn active" id="googleSignInBtn" style="width:100%;margin-bottom:10px;">🔐 使用 Google 帳號登入 (Firebase Auth)</button>
+          <p style="font-size:0.84rem;color:#475569;margin:0 0 12px;">${adminAuthStatusMsg || "請使用已授權之 Google 帳號登入後台，編輯後將即時同步至全校訪客："}</p>
+          <button type="button" class="pill-btn active" id="googleSignInBtn" style="width:100%;margin-bottom:10px;">🔐 選擇 Google 帳號登入認證</button>
         ` : `
           <p style="font-size:0.82rem;color:#475569;margin:0 0 10px;">目前尚未於 <code>data/firebase-config.js</code> 啟用 Firebase，暫以本機管理者測試模式登入（預設：<code>${admins[0].email}</code>）：</p>
           <div class="admin-field">
@@ -1529,20 +1580,7 @@
       `;
       document.getElementById("adminCloseBtn").onclick = () => { adminModal.hidden = true; };
       if (fbReady) {
-        document.getElementById("googleSignInBtn").onclick = () => {
-          const provider = new firebase.auth.GoogleAuthProvider();
-          fbAuth.signInWithPopup(provider).then(res => {
-            const em = (res.user.email || "").toLowerCase();
-            const found = loadAdmins().find(a => a.email.toLowerCase() === em);
-            if (!found) {
-              fbAuth.signOut();
-              alert(`帳號 ${em} 不在管理者白名單中！請先由現任管理者於後台新增您的 Google 帳號。`);
-              return;
-            }
-            adminAuthedUser = { name: res.user.displayName || found.name, email: em };
-            renderAdminModal();
-          }).catch(err => alert("Google 登入失敗：" + err.message));
-        };
+        document.getElementById("googleSignInBtn").onclick = startGoogleAdminSignIn;
       } else {
         document.getElementById("adminLoginSubmit").onclick = () => {
           const em = document.getElementById("adminLoginEmail").value.trim().toLowerCase();
@@ -1797,6 +1835,14 @@
 
   document.getElementById("adminBtn").onclick = () => {
     adminModal.hidden = false;
+    if (fbReady && !adminAuthedUser) {
+      if (fbAuth && fbAuth.currentUser && verifyGoogleAdminUser(fbAuth.currentUser)) {
+        renderAdminModal();
+      } else {
+        startGoogleAdminSignIn();
+      }
+      return;
+    }
     renderAdminModal();
   };
 
