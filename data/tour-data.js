@@ -37,10 +37,10 @@ window.CAMPUS_TOUR_STOPS = [
   {
     id: "stop_cshow",
     buildingId: "corridor_mid",
-    titleZh: "04. 創客藝廊（2F 中央連廊）",
-    titleEn: "04. Maker Gallery (2F Central Walkway)",
-    descZh: "穿過 A 棟中央穿堂踏上二樓連廊，即可見「創客藝廊」，長期展出學生多元藝術創作、閱讀素養與創客作品，是充滿創意的人文藝術實驗場。",
-    descEn: "Connecting Buildings A and B on the 2nd floor, Maker Gallery showcases students' diverse artistic works, reading literacy projects, and maker creations.",
+    titleZh: "04. C-Show創客走廊（2F 中央連廊）",
+    titleEn: "04. C-Show Maker Corridor (2F Central Walkway)",
+    descZh: "穿過 A 棟中央穿堂踏上二樓連廊，即可見兩側出入口標示的「C-Show創客走廊」，兩側牆體與玻璃窗面長期展出學生多元藝術創作、書法剪紙、閱讀素養與創客作品，是充滿創意的人文藝術實驗場。",
+    descEn: "Connecting Buildings A and B on the 2nd floor, C-Show Maker Corridor showcases students' diverse artistic works, reading literacy projects, and maker creations across its enclosed windows.",
     target: [6.1, 4.5, 7.0],
     camPos: [18.0, 6.2, 3.0],
     photos: ["assets/photos/cshow_1.jpg", "assets/photos/cshow_2.jpg", "assets/photos/cshow_3.jpg", "assets/photos/cshow_4.jpg"]
@@ -63,8 +63,8 @@ window.CAMPUS_TOUR_STOPS = [
     titleEn: "06. Building B Classrooms & Specialty Labs",
     descZh: "北棟兩層校舍匯集二至五年級教室與圖書室、校史室、美勞教室、社會教室及 E 化教室，提供豐富多元的學科探索環境。",
     descEn: "The north wing houses Grades 2–5 classrooms along with the Library, History Room, Art Room, Social Studies Room, and Smart Classroom.",
-    target: [7.56, 4.8, -10.38],
-    camPos: [11.24, 4.8, 5.49],
+    target: [-25.2, 5.2, 8.7],
+    camPos: [-20.5, 5.5, 16.5],
     photos: ["assets/photos/bldg_b_art.jpg", "assets/photos/bldg_b_social.jpg"]
   },
   {

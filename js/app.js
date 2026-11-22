@@ -22,7 +22,7 @@
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  const camera = new THREE.PerspectiveCamera(44, window.innerWidth / window.innerHeight, 0.5, 1200);
+  const camera = new THREE.PerspectiveCamera(44, window.innerWidth / window.innerHeight, 0.15, 1200);
 
   // 燈光
   const hemiLight = new THREE.HemisphereLight(0xfef9ef, 0x8fb376, 0.72);
@@ -48,7 +48,7 @@
   if (loadEl) setTimeout(() => loadEl.classList.add("fade-out"), 380);
 
   // --- 2. 軌道相機狀態與飛航動畫 ---
-  const initZone = (D.zones && D.zones[0]) || { target: [-2, 2, 18], camPos: [125, 102, 115] };
+  const initZone = (D.zones && D.zones[0]) || { target: [8.53, 1.86, 29.06], camPos: [89.88, 49.78, 84.85] };
   const initDx = initZone.camPos[0] - initZone.target[0];
   const initDy = initZone.camPos[1] - initZone.target[1];
   const initDz = initZone.camPos[2] - initZone.target[2];
@@ -62,8 +62,10 @@
   let flyAnim = null;
 
   function applyCamera() {
-    camState.pitch = Math.max(0.08, Math.min(1.48, camState.pitch));
-    camState.dist = Math.max(6, Math.min(380, camState.dist));
+    const minPitch = (typeof walkMode !== "undefined" && walkMode) ? -0.25 : 0.08;
+    const minDist = (typeof walkMode !== "undefined" && walkMode) ? 0.42 : 6;
+    camState.pitch = Math.max(minPitch, Math.min(1.48, camState.pitch));
+    camState.dist = Math.max(minDist, Math.min(380, camState.dist));
     const hDist = camState.dist * Math.cos(camState.pitch);
     const vDist = camState.dist * Math.sin(camState.pitch);
     camera.position.set(
@@ -116,15 +118,25 @@
 
   // --- 3. 滑鼠 / 鍵盤 / 觸控互動 ---
   let dragMode = null; // 'pan' | 'rot'
+  let isUserOrbiting = false;
+  let walkOrbitVelYaw = 0, walkOrbitVelPitch = 0;
   let lastX = 0, lastY = 0, downX = 0, downY = 0;
 
   function panByPixels(dx, dy) {
     const scale = camState.dist * 0.0014;
     const cosY = Math.cos(camState.yaw);
     const sinY = Math.sin(camState.yaw);
-    // 右移 (dx>0) -> target 往畫面左方移動
-    camState.target.x -= (dx * cosY + dy * sinY) * scale;
-    camState.target.z -= (-dx * sinY + dy * cosY) * scale;
+    const dX = -(dx * cosY + dy * sinY) * scale;
+    const dZ = -(-dx * sinY + dy * cosY) * scale;
+    camState.target.x += dX;
+    camState.target.z += dZ;
+    if (walkMode && !guidedWalk) {
+      const nx = walkState.x + dX;
+      const nz = walkState.z + dZ;
+      if (!isBlocked(nx, walkState.z, walkState.y)) walkState.x = nx;
+      if (!isBlocked(walkState.x, nz, walkState.y)) walkState.z = nz;
+      walkState.y = getWalkElevation(walkState.x, walkState.z, walkState.y);
+    }
   }
 
   canvas.addEventListener("contextmenu", e => e.preventDefault());
@@ -133,7 +145,10 @@
     flyAnim = null;
     lastX = downX = e.clientX;
     lastY = downY = e.clientY;
-    dragMode = walkMode ? "walk_look" : (e.button === 2 ? "rot" : "pan");
+    // 漫步模式下所有視角皆以小人為中心，按住左鍵或右鍵拖曳皆可 360 度環顧四週（未按滑鼠鍵移動游標時不旋轉）
+    // 鳥瞰模式下按住左鍵拖曳平移，按住右鍵拖曳旋轉
+    dragMode = walkMode ? "rot" : (e.button === 2 ? "rot" : "pan");
+    if (walkMode) isUserOrbiting = true;
   });
 
   window.addEventListener("mousemove", e => {
@@ -143,18 +158,25 @@
     lastX = e.clientX;
     lastY = e.clientY;
 
-    if (dragMode === "walk_look") {
-      walkState.yaw -= dx * 0.006;
-      walkState.pitch = Math.max(-0.55, Math.min(0.65, walkState.pitch + dy * 0.004));
+    if (dragMode === "pan") {
+      panByPixels(dx, dy);
+      if (!walkMode) applyCamera();
       return;
     }
 
-    if (dragMode === "pan") {
-      panByPixels(dx, dy);
-    } else {
-      camState.yaw -= dx * 0.006;
-      camState.pitch += dy * 0.005;
+    if (walkMode) {
+      if (walkFirstPerson) {
+        walkState.yaw -= dx * 0.006;
+        walkState.pitch = Math.max(-0.55, Math.min(0.65, walkState.pitch + dy * 0.004));
+      } else {
+        walkOrbitVelYaw -= dx * 0.0055;
+        walkOrbitVelPitch += dy * 0.0045;
+      }
+      return;
     }
+
+    camState.yaw -= dx * 0.006;
+    camState.pitch += dy * 0.005;
     applyCamera();
   });
 
@@ -162,6 +184,7 @@
     if (dragMode && Math.hypot(e.clientX - downX, e.clientY - downY) < 5 && e.button === 0) {
       pickBuildingAt(e.clientX, e.clientY);
     }
+    isUserOrbiting = false;
     dragMode = null;
   });
 
@@ -169,7 +192,7 @@
     e.preventDefault();
     flyAnim = null;
     if (walkMode && (!guidedWalk || guidedWalk.paused)) {
-      walkFollowDist = Math.max(1.5, Math.min(28, walkFollowDist * (e.deltaY > 0 ? 1.12 : 0.89)));
+      walkFollowDist = Math.max(2.2, Math.min(48, walkFollowDist * (e.deltaY > 0 ? 1.12 : 0.89)));
       return;
     }
     camState.dist *= e.deltaY > 0 ? 1.1 : 0.9;
@@ -181,6 +204,7 @@
   canvas.addEventListener("touchstart", e => {
     flyAnim = null;
     if (e.touches.length === 1) {
+      if (walkMode) isUserOrbiting = true;
       touchPrev = { mode: "one", x: e.touches[0].clientX, y: e.touches[0].clientY, sx: e.touches[0].clientX, sy: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
       const t0 = e.touches[0], t1 = e.touches[1];
@@ -201,6 +225,11 @@
       const dy = e.touches[0].clientY - touchPrev.y;
       touchPrev.x = e.touches[0].clientX;
       touchPrev.y = e.touches[0].clientY;
+      if (walkMode) {
+        walkOrbitVelYaw -= dx * 0.0055;
+        walkOrbitVelPitch += dy * 0.0045;
+        return;
+      }
       panByPixels(dx, dy);
     } else if (touchPrev.mode === "two" && e.touches.length === 2) {
       const t0 = e.touches[0], t1 = e.touches[1];
@@ -208,15 +237,19 @@
       const ang = Math.atan2(t1.clientY - t0.clientY, t1.clientX - t0.clientX);
       const cy = (t0.clientY + t1.clientY) / 2;
 
-      camState.dist *= touchPrev.dist / Math.max(10, dist);
-      camState.yaw += (ang - touchPrev.ang);
-      camState.pitch += (cy - touchPrev.cy) * 0.004;
+      if (walkMode) {
+        walkFollowDist = Math.max(2.2, Math.min(48, walkFollowDist * (touchPrev.dist / Math.max(10, dist))));
+      } else {
+        camState.dist *= touchPrev.dist / Math.max(10, dist);
+        camState.yaw += (ang - touchPrev.ang);
+        camState.pitch += (cy - touchPrev.cy) * 0.004;
+      }
 
       touchPrev.dist = dist;
       touchPrev.ang = ang;
       touchPrev.cy = cy;
     }
-    applyCamera();
+    if (!walkMode) applyCamera();
   }, { passive: false });
 
   canvas.addEventListener("touchend", e => {
@@ -226,6 +259,7 @@
         pickBuildingAt(t.clientX, t.clientY);
       }
     }
+    isUserOrbiting = false;
     touchPrev = null;
   });
 
@@ -257,13 +291,19 @@
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObjects(built.clickableMeshes, false);
 
-    // 校園漫步模式下點擊地面或球場／跑道可直接走過去
+    // 校園漫步模式下：點擊任何水平地面、走廊樓板、樓梯、廣場或球場皆可「隨點隨走」自動走過去（點擊垂直牆面或門牌則開啟建築資訊）
     if (walkMode && !guidedWalk) {
-      if (hits.length === 0 || (hits[0].point && Math.abs(hits[0].point.y - walkState.y) < 0.85 &&
-          ["track_field", "solar_court", "mural_courtyard", "banana_compost"].includes(hits[0].object.userData.buildingId))) {
-        const pt = hits.length > 0 ? hits[0].point : (raycaster.ray.intersectPlane(groundPlane, groundHitPt) ? groundHitPt : null);
-        if (pt && !isBlocked(pt.x, pt.z, walkState.y)) {
-          clickWalkTarget = { x: pt.x, z: pt.z };
+      if (hits.length === 0) {
+        if (raycaster.ray.intersectPlane(groundPlane, groundHitPt) && !isBlocked(groundHitPt.x, groundHitPt.z, walkState.y)) {
+          clickWalkTarget = { x: groundHitPt.x, z: groundHitPt.z };
+          return;
+        }
+      } else {
+        const hit = hits[0];
+        const isHorizontalSurface = (hit.face && hit.face.normal.y > 0.55) || (hit.point && Math.abs(hit.point.y - walkState.y) < 0.35);
+        const sameFloorArea = hit.point && Math.abs(hit.point.y - walkState.y) < 1.85;
+        if (isHorizontalSurface && sameFloorArea && !isBlocked(hit.point.x, hit.point.z, walkState.y)) {
+          clickWalkTarget = { x: hit.point.x, z: hit.point.z };
           return;
         }
       }
@@ -474,10 +514,11 @@
   function updateLabels() {
     const w = window.innerWidth, h = window.innerHeight;
     const v = new THREE.Vector3();
+    const isGuiding = !!(walkMode && guidedWalk);
     const walking = walkMode && !guidedWalk;
     for (let i = 0; i < labelEls.length; i++) {
       const item = labelEls[i];
-      if (walking) {
+      if (walking || isGuiding) {
         if (item.isAmbient || !item.b) {
           item.el.style.display = "none";
           continue;
@@ -487,15 +528,41 @@
           Math.max(0, Math.abs(lx) - item.b.w / 2),
           Math.max(0, Math.abs(lz) - item.b.d / 2)
         );
-        if (edgeDist > 14) {
+        const isDest = isGuiding && guidedWalk.endBid && item.b.id === guidedWalk.endBid;
+        if (edgeDist > (isGuiding ? (isDest ? 28 : 14) : 14)) {
           item.el.style.display = "none";
           continue;
         }
       }
       v.copy(item.pos).project(camera);
-      if (v.z > 1) {
+      if (v.z > 1 || (isGuiding && (Math.abs(v.x) > 0.92 || Math.abs(v.y) > 0.92))) {
         item.el.style.display = "none";
       } else {
+        if (isGuiding && item.b && !(guidedWalk.endBid && item.b.id === guidedWalk.endBid)) {
+          // 自動帶路時：檢測小人眼睛/鏡頭視線是否被建築主體遮擋，看不到就隱藏標籤
+          const eyePos = new THREE.Vector3(walkState.x, walkState.y + 1.5, walkState.z);
+          const dir = new THREE.Vector3().subVectors(item.pos, eyePos);
+          const dist = dir.length();
+          let occluded = false;
+          if (dist > 2.0 && built && built.clickableMeshes) {
+            dir.divideScalar(dist);
+            camObsRay.set(eyePos, dir);
+            camObsRay.near = 0.5;
+            camObsRay.far = Math.max(0.6, dist - 2.0);
+            const hits = camObsRay.intersectObjects(built.clickableMeshes, false);
+            for (let hi = 0; hi < hits.length; hi++) {
+              const ho = hits[hi].object;
+              if (ho.userData && ho.userData.isBuildingBody && ho.userData.buildingId !== item.b.id) {
+                occluded = true;
+                break;
+              }
+            }
+          }
+          if (occluded) {
+            item.el.style.display = "none";
+            continue;
+          }
+        }
         item.el.style.display = "block";
         item.el.style.left = ((v.x * 0.5 + 0.5) * w) + "px";
         item.el.style.top = ((-v.y * 0.5 + 0.5) * h) + "px";
@@ -697,13 +764,117 @@
   scene.add(navRouteGroup);
   let activeRoutePts = null;
 
+  function resolveNavTarget(id) {
+    const rm = (D.roomNavTargets || []).find(r => r.id === id);
+    if (rm) {
+      return {
+        id: rm.id,
+        node: rm.node,
+        parentId: rm.parentId,
+        label: lang === "en" ? rm.nameEn : rm.name,
+        isRoom: true,
+        is2F: !!rm.is2F,
+        dest2F: rm.dest2F || null,
+        facingYaw: typeof rm.facingYaw === "number" ? rm.facingYaw : null
+      };
+    }
+    if (id === "corridor_mid") {
+      const b = D.buildings.find(x => x.id === id);
+      return {
+        id: "corridor_mid",
+        node: "n_a_portal_s",
+        parentId: "bldg_a",
+        label: lang === "en" ? (b ? b.nameEn : "2F C-Show Maker Corridor") : (b ? b.name : "2F C-Show 創客走廊"),
+        isRoom: false,
+        is2F: true,
+        dest2F: "maker_corr",
+        facingYaw: 0.531
+      };
+    }
+    const b = D.buildings.find(x => x.id === id);
+    const node = (D.buildingNavNode || {})[id];
+    if (b && node) {
+      return { id: b.id, node, parentId: b.id, label: lang === "en" ? b.nameEn : b.name, isRoom: false, is2F: false, dest2F: null, facingYaw: null };
+    }
+    return null;
+  }
+
+  // 建立二樓導航專屬 3D 階梯與走廊路徑點（C-Show 創客走廊、圖書室、視聽教室）
+  function build2FPathWaypoints(dest2F) {
+    const bA = D.buildings.find(item => item.id === "bldg_a");
+    const bB = D.buildings.find(item => item.id === "bldg_b");
+    const bC = D.buildings.find(item => item.id === "bldg_c");
+    if (!bA || !bB || !bC) return [];
+    const pt = (b, lx, lz, y) => {
+      const w = toBuildingWorld(b, lx, lz);
+      return new THREE.Vector3(w.x, y, w.z);
+    };
+    // 依使用者指示：由 A 棟中央紅磚玄關左側（西側）雙折樓梯拾級而上至 2F 玄關平台
+    const stairWestUpPts = [
+      pt(bA, -1.80, 7.57, 0.20),
+      pt(bA, -2.95, 7.57, 0.25),
+      pt(bA, -5.50, 7.57, 1.75),
+      pt(bA, -5.50, 5.77, 1.84),
+      pt(bA, -2.65, 5.77, 3.45),
+      pt(bA, -1.70, 5.77, 3.60),
+      pt(bA, -1.20, 3.80, 3.60)
+    ];
+
+    if (dest2F === "maker_corr") {
+      // 走 A 棟中央玄關左側樓梯上到 2F，停在 2F 創客走廊入口處並面對創客走廊停止
+      return [
+        ...stairWestUpPts,
+        pt(bA, 0.37, 1.45, 3.60)
+      ];
+    }
+    if (dest2F === "library") {
+      // 經由 2F C-Show 創客走廊直通 B 棟 2F 走廊，往東走過 205 E化教室後停在 206-208 圖書室正門門牌前
+      return [
+        ...stairWestUpPts,
+        pt(bA, 0.37, 0.00, 3.50),
+        pt(bB, 3.40, 3.15, 3.65),
+        pt(bB, 9.50, 3.15, 3.65),
+        pt(bB, 13.05, 3.15, 3.65)
+      ];
+    }
+    if (dest2F === "av_hall") {
+      // 依使用者指示採 C 棟走廊最短路線：經由 C 棟 1F 走廊直接由 C 棟 1-2F 雙折樓梯登上 2F，直達 2F 視聽教室門前
+      // Flight 1 (3m寬, lx: -1.84..1.16) 中心線 -0.34；Flight 2 (1.8m寬, lx: -3.64..-1.84) 中心線 -2.74
+      return [
+        pt(bC, -0.34, 15.52, 0.08),
+        pt(bC, -0.34, 17.30, 0.95),
+        pt(bC, -0.34, 18.42, 1.84),
+        pt(bC, -2.74, 18.42, 1.84),
+        pt(bC, -2.74, 17.30, 2.72),
+        pt(bC, -2.74, 15.52, 3.60),
+        pt(bC, -4.45, 13.95, 3.60)
+      ];
+    }
+    return stairWestUpPts;
+  }
+
   function populateNavSelects() {
     const targets = Object.keys(D.buildingNavNode || {}).map(bid => D.buildings.find(b => b.id === bid)).filter(Boolean);
     const curS = navStartSel.value || "main_gate";
     const curE = navEndSel.value || "solar_court";
-    const opts = targets.map(b => `<option value="${b.id}">${lang === "en" ? b.nameEn : b.name}</option>`).join("");
-    navStartSel.innerHTML = opts;
-    navEndSel.innerHTML = opts;
+    const bOpts = targets.map(b => `<option value="${b.id}">${lang === "en" ? b.nameEn : b.name}</option>`).join("");
+    let html = `<optgroup label="${lang === "en" ? "🏫 Campus Landmarks" : "🏫 校園建築與特色景點"}">${bOpts}</optgroup>`;
+
+    const rooms = D.roomNavTargets || [];
+    const groups = [];
+    const byGroup = {};
+    rooms.forEach(r => {
+      const gLabel = lang === "en" ? (r.groupEn || r.group) : r.group;
+      if (!byGroup[gLabel]) { byGroup[gLabel] = []; groups.push(gLabel); }
+      byGroup[gLabel].push(r);
+    });
+    groups.forEach(gLabel => {
+      const rOpts = byGroup[gLabel].map(r => `<option value="${r.id}">${lang === "en" ? r.nameEn : r.name}</option>`).join("");
+      html += `<optgroup label="${gLabel}">${rOpts}</optgroup>`;
+    });
+
+    navStartSel.innerHTML = html;
+    navEndSel.innerHTML = html;
     navStartSel.value = curS;
     navEndSel.value = curE;
   }
@@ -835,47 +1006,67 @@
     return null;
   }
 
-  function resolveObstacleFreePts(rawPts) {
+  function isSegmentBlocked(a, b) {
+    const dist = Math.hypot(b.x - a.x, b.z - a.z);
+    const samples = Math.max(2, Math.ceil(dist / 0.65));
+    for (let s = 1; s < samples; s++) {
+      const t = s / samples;
+      if (isBlocked(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, 0)) return true;
+    }
+    return false;
+  }
+
+  function resolveObstacleFreePts(rawPts, keepFinalApproach = false) {
     if (!rawPts || rawPts.length < 2) return rawPts;
-    const out = [rawPts[0].clone()];
-    for (let i = 0; i < rawPts.length - 1; i++) {
-      const a = rawPts[i], b = rawPts[i + 1];
-      const dist = Math.hypot(b.x - a.x, b.z - a.z);
-      const samples = Math.max(2, Math.ceil(dist / 0.75));
-      let hit = false;
-      for (let s = 1; s < samples; s++) {
-        const t = s / samples;
-        if (isBlocked(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, 0)) { hit = true; break; }
-      }
-      if (hit) {
-        const detour = findGridDetour(a.x, a.z, b.x, b.z);
-        if (detour && detour.length > 0) {
-          detour.forEach(p => {
-            const prev = out[out.length - 1];
-            if (Math.hypot(p.x - prev.x, p.z - prev.z) > 1.2) out.push(p);
-          });
+    // 直線視線拉直優化（String-Pulling）：沿既定路網節點走最短最快直線路徑，絕不產生格點繞路
+    const simplified = [rawPts[0].clone()];
+    const lockFrom = (keepFinalApproach && rawPts.length >= 3) ? rawPts.length - 2 : rawPts.length - 1;
+    let curIdx = 0;
+    while (curIdx < lockFrom) {
+      let nextIdx = curIdx + 1;
+      for (let j = lockFrom; j > curIdx + 1; j--) {
+        if (!isSegmentBlocked(rawPts[curIdx], rawPts[j])) {
+          nextIdx = j;
+          break;
         }
       }
-      const prev = out[out.length - 1];
-      if (Math.hypot(b.x - prev.x, b.z - prev.z) > 0.5) out.push(b.clone());
+      simplified.push(rawPts[nextIdx].clone());
+      curIdx = nextIdx;
     }
-    return out;
+    for (let k = lockFrom + 1; k < rawPts.length; k++) {
+      simplified.push(rawPts[k].clone());
+    }
+    return simplified;
   }
 
   document.getElementById("runNavBtn").onclick = () => {
-    const sBid = navStartSel.value, eBid = navEndSel.value;
-    const sNode = D.buildingNavNode[sBid], eNode = D.buildingNavNode[eBid];
-    if (!sNode || !eNode) return;
+    const sInfo = resolveNavTarget(navStartSel.value);
+    const eInfo = resolveNavTarget(navEndSel.value);
+    if (!sInfo || !eInfo || sInfo.id === eInfo.id) {
+      navInfoBox.hidden = false;
+      navInfoBox.textContent = lang === "en" ? "Same location or no path." : "起終點相同或無連通路徑。";
+      return;
+    }
+    const sBid = sInfo.parentId, eBid = eInfo.parentId;
     clearNavRoute();
-    const pathIds = findShortestPath(sNode, eNode);
-    if (!pathIds || pathIds.length < 2) {
+    const pathIds = findShortestPath(sInfo.node, eInfo.node);
+    if ((!pathIds || pathIds.length < 2) && !sInfo.is2F && !eInfo.is2F) {
       navInfoBox.hidden = false;
       navInfoBox.textContent = lang === "en" ? "Same location or no path." : "起終點相同或無連通路徑。";
       return;
     }
 
-    const rawPts = pathIds.map(id => new THREE.Vector3(D.navNodes[id][0], 0.25, D.navNodes[id][1]));
-    const pts = resolveObstacleFreePts(rawPts);
+    const baseIds = (pathIds && pathIds.length >= 1) ? pathIds : [sInfo.node];
+    const rawPts = baseIds.map(id => new THREE.Vector3(D.navNodes[id][0], 0.25, D.navNodes[id][1]));
+    let pts = rawPts.length >= 2 ? resolveObstacleFreePts(rawPts, !!eInfo.isRoom && !eInfo.is2F) : rawPts.slice();
+    if (sInfo.is2F) {
+      const downPts = build2FPathWaypoints(sInfo.dest2F).slice().reverse();
+      pts = [...downPts, ...pts];
+    }
+    if (eInfo.is2F) {
+      const upPts = build2FPathWaypoints(eInfo.dest2F);
+      pts = [...pts, ...upPts];
+    }
     activeRoutePts = pts;
 
     // 低調淺灰色細導引線 (避免太顯眼)
@@ -895,12 +1086,18 @@
       routeArrows.push({ mesh: m, offset: i / arrowCount });
     }
 
-    // 起終點標記柱
-    [[pts[0], 0x22c55e], [pts[pts.length - 1], 0xef4444]].forEach(([p, col]) => {
-      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.18, 2.8, 12), new THREE.MeshLambertMaterial({ color: col }));
-      pin.position.set(p.x, 1.6, p.z);
-      navRouteGroup.add(pin);
-    });
+    // 起終點標記柱（依指示隱藏定位用柱體，不干擾畫面）
+    const startPin = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.18, 2.8, 12), new THREE.MeshLambertMaterial({ color: 0x22c55e }));
+    startPin.position.set(pts[0].x, 1.6, pts[0].z);
+    startPin.userData.isStartPin = true;
+    startPin.visible = false;
+
+    const endPin = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.18, 2.8, 12), new THREE.MeshLambertMaterial({ color: 0xef4444 }));
+    endPin.position.set(pts[pts.length - 1].x, 1.6, pts[pts.length - 1].z);
+    endPin.userData.isEndPin = true;
+    endPin.visible = false;
+
+    navRouteGroup.add(startPin, endPin);
 
     let totalDist = 0;
     for (let i = 1; i < pts.length; i++) totalDist += pts[i].distanceTo(pts[i - 1]);
@@ -910,18 +1107,16 @@
       ? `${lang === "en" ? "Turns" : "轉彎指引"}：${turns.slice(0, 5).join(" → ")}${turns.length > 5 ? " ..." : ""}`
       : (lang === "en" ? "Go straight" : "直行即可抵達");
 
-    const sB = D.buildings.find(x => x.id === sBid);
-    const eB = D.buildings.find(x => x.id === eBid);
-    const sLabel = sB ? (lang === "en" ? sB.nameEn : sB.name) : sBid;
-    const eLabel = eB ? (lang === "en" ? eB.nameEn : eB.name) : eBid;
+    const sLabel = sInfo.label;
+    const eLabel = eInfo.label;
 
     navInfoBox.hidden = false;
     navInfoBox.innerHTML = `
+      <button type="button" class="pill-btn active" id="guideWalkBtn" style="margin-bottom:6px;width:100%;padding:5px;">🚶 ${lang === "en" ? "Simulate Auto-Guide" : "模擬自動帶路"}</button>
       <div>${lang === "en" ? "Distance" : "步行距離"}：<b>${Math.round(totalDist)} m</b>（約 ${secs} ${lang === "en" ? "sec" : "秒"}）</div>
       <div style="font-size:0.72rem;color:#475569;margin-top:2px;">${turnStr}</div>
-      <button type="button" class="pill-btn active" id="guideWalkBtn" style="margin-top:6px;width:100%;padding:5px;">🚶 ${lang === "en" ? "Simulate Auto-Guide" : "模擬自動帶路"}</button>
     `;
-    document.getElementById("guideWalkBtn").onclick = () => startGuidedWalk(pts, sLabel, eLabel, totalDist, secs, eBid);
+    document.getElementById("guideWalkBtn").onclick = () => startGuidedWalk(pts, sLabel, eLabel, totalDist, secs, eBid, eInfo);
   };
   document.getElementById("clearNavBtn").onclick = clearNavRoute;
 
@@ -933,6 +1128,222 @@
   let clickWalkTarget = null;
   let guidedWalk = null;
   const walkState = { x: 54, z: 39, y: 0, vy: 0, jumping: false, yaw: 1.05, pitch: 0.08, stepPhase: 0 };
+
+  // 漫步鏡頭跟隨、防遮擋遲滯鎖定與鍵盤方向鎖定狀態
+  const UP_AXIS = new THREE.Vector3(0, 1, 0);
+  const camOffset = new THREE.Vector3();
+  const desiredWalkTarget = new THREE.Vector3();
+  const moveDeltaVec = new THREE.Vector3();
+  const lockedKeyFwd = new THREE.Vector3(0, 0, -1);
+  const lockedKeyRight = new THREE.Vector3(1, 0, 0);
+  const moveDirVec = new THREE.Vector3();
+  let lastKeySig = "";
+  let autoOrbitActive = false;
+  let autoOrbitBuilding = null;
+  let camAzVel = 0;
+  let walkZoomTween = null;
+  let lastAnimNow = performance.now();
+
+  const OCCLUDABLE_STYLES = new Set(["wing_a", "wing_b", "wing_c", "wing_d", "corridor", "toilet", "kitchen", "food_lab", "stage", "solar_court", "samba", "gate"]);
+  let buildingMatCache = null;
+  let meshMatCache = null;
+
+  function ensureBuildingMatCache() {
+    if (buildingMatCache) return buildingMatCache;
+    buildingMatCache = {};
+    meshMatCache = new Map();
+    const seenMats = new Set();
+    const groups = built.buildingGroups || {};
+    Object.keys(groups).forEach(bid => {
+      const entries = [];
+      const localSeen = new Set();
+      groups[bid].traverse(obj => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        const cloned = mats.map(m => {
+          if (seenMats.has(m)) {
+            const c = m.clone();
+            seenMats.add(c);
+            return c;
+          }
+          seenMats.add(m);
+          return m;
+        });
+        obj.material = Array.isArray(obj.material) ? cloned : cloned[0];
+        const meshEntries = [];
+        cloned.forEach(m => {
+          const entry = {
+            mat: m,
+            origOpacity: m.opacity !== undefined ? m.opacity : 1.0,
+            origTransparent: !!m.transparent,
+            origDepthWrite: m.depthWrite !== undefined ? m.depthWrite : true
+          };
+          meshEntries.push(entry);
+          if (!localSeen.has(m)) {
+            localSeen.add(m);
+            entries.push(entry);
+          }
+        });
+        meshMatCache.set(obj, meshEntries);
+      });
+      buildingMatCache[bid] = entries;
+    });
+    return buildingMatCache;
+  }
+
+  function segmentHitsBuildingOBB(b, p0x, p0y, p0z, p1x, p1y, p1z) {
+    const a = toBuildingLocal(b, p0x, p0z);
+    const c = toBuildingLocal(b, p1x, p1z);
+    const bH = b.floors ? b.floors * (b.floorHeight || 3.4) : (b.h || 4.0);
+    const hw = b.w * 0.5 + 0.8, hd = b.d * 0.5 + (b.id === "bldg_a" ? 4.2 : 0.8);
+    const dx = c.lx - a.lx, dy = p1y - p0y, dz = c.lz - a.lz;
+    let tmin = 0.02, tmax = 0.98;
+    const slabs = [
+      [a.lx, dx, -hw, hw],
+      [p0y, dy, 0.05, bH + 0.6],
+      [a.lz, dz, -hd, hd]
+    ];
+    for (let i = 0; i < 3; i++) {
+      const [o, d, minB, maxB] = slabs[i];
+      if (Math.abs(d) < 1e-6) {
+        if (o < minB || o > maxB) return false;
+      } else {
+        let t1 = (minB - o) / d;
+        let t2 = (maxB - o) / d;
+        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+        tmin = Math.max(tmin, t1);
+        tmax = Math.min(tmax, t2);
+        if (tmin > tmax) return false;
+      }
+    }
+    return true;
+  }
+
+  function findOccludingBuildings(px, py, pz, cx, cy, cz) {
+    const hits = [];
+    for (let i = 0; i < D.buildings.length; i++) {
+      const b = D.buildings[i];
+      if (!OCCLUDABLE_STYLES.has(b.style)) continue;
+      if (segmentHitsBuildingOBB(b, px, py, pz, cx, cy, cz)) hits.push(b);
+    }
+    return hits;
+  }
+
+  const occRayOrigin = new THREE.Vector3();
+  const occRayTarget = new THREE.Vector3();
+  const occRayDir = new THREE.Vector3();
+  const camBackRayOrigin = new THREE.Vector3();
+  const camBackRayDir = new THREE.Vector3();
+  let culledLensMeshes = new Set();
+  let smoothCamLiftY = 0;
+
+  // 清除鏡頭與小人之間視線上的單一遮擋網格隱藏狀態（不改變材質透明度，完全無半透明殘影）
+  function restoreCulledLensMeshes() {
+    if (culledLensMeshes.size === 0) return;
+    culledLensMeshes.forEach(m => { m.visible = true; });
+    culledLensMeshes.clear();
+  }
+
+  // 當攝影機跟隨小人進入室內、走廊或上下樓梯時，保持固定舒適距離（小人不會忽大忽小），
+  // 若鏡頭正後方恰有單一薄牆、欄杆或柱子擋在「鏡頭 → 小人」連線上，僅暫時剔除該擋住鏡頭的網格，
+  // 讓小人與室內外周邊環境皆以 100% 實體清晰呈現（零半透明殘影、零畫面晃動）
+  function updateCameraLineOfSightCulling(camPos, charX, charY, charZ) {
+    restoreCulledLensMeshes();
+    const heights = [0.45, 0.85, 1.20, 1.48];
+    for (let i = 0; i < heights.length; i++) {
+      occRayOrigin.copy(camPos);
+      occRayTarget.set(charX, charY + heights[i], charZ);
+      occRayDir.subVectors(occRayTarget, occRayOrigin);
+      const dist = occRayDir.length();
+      if (dist < 0.35) continue;
+      occRayDir.divideScalar(dist);
+
+      // 正向檢測鏡頭與小人之間的連線（距離小於 dist - 0.22m 代表位於小人背後與鏡頭之間，絕不影響小人前方的任何牆面與景物）
+      raycaster.set(occRayOrigin, occRayDir);
+      raycaster.near = 0.05;
+      raycaster.far = Math.max(0.1, dist - 0.22);
+      const hitsFwd = raycaster.intersectObjects(built.clickableMeshes, false);
+      for (let h = 0; h < hitsFwd.length; h++) {
+        const hit = hitsFwd[h];
+        // 絕不隱藏腳下地板、樓板與階梯踏面（僅在屋頂/天花板位於小人上方 hit.point.y > charY + 1.15 且擋住鳥瞰視線時才暫時隱藏）
+        if (hit.face && Math.abs(hit.face.normal.y) > 0.65) {
+          if (hit.point.y <= charY + 1.15) continue;
+          hit.object.visible = false;
+          culledLensMeshes.add(hit.object);
+          continue;
+        }
+        if (hit.object.position.y < 0.16 && hit.point.y < charY + 0.35) continue;
+        // 絕不隱藏主要校舍建築物本體量體（避免整棟建築消失導致穿透看到室內或遠方窗框；若在 D 棟樓梯則透視遮擋的廁所量體）
+        if (hit.object.userData && hit.object.userData.isBuildingBody) {
+          if (isInWingDEastCorridorOrStair(charX, charZ) && hit.object.userData.buildingId === "tennis_toilet") {
+            hit.object.visible = false;
+            culledLensMeshes.add(hit.object);
+            continue;
+          }
+          continue;
+        }
+        if (hit.object.geometry && hit.object.geometry.parameters) {
+          const p = hit.object.geometry.parameters;
+          if (p.width > 1.8 && p.depth > 1.8) continue;
+          if (p.height > 2.0 && (p.width > 1.8 || p.depth > 1.8)) continue;
+        }
+        hit.object.visible = false;
+        culledLensMeshes.add(hit.object);
+      }
+    }
+    raycaster.near = 0.1;
+    raycaster.far = Infinity;
+  }
+
+  // 攝影機室內/走廊防穿牆碰撞 (SpringArm 相機彈簧臂)：
+  // 檢測從目標點（小人胸口中心）往後方預計鏡頭位置之連線，若背後有實體牆面/柱子，自動將鏡頭縮進室內，絕不穿透出戶外或外牆後方
+  const camObsRay = new THREE.Raycaster();
+  const camObsDir = new THREE.Vector3();
+  function clampCameraObstruction(targetPos, desiredCamPos, minDistance = 1.05) {
+    if (!built || !built.clickableMeshes) return;
+    camObsDir.subVectors(desiredCamPos, targetPos);
+    const desiredDist = camObsDir.length();
+    if (desiredDist < minDistance + 0.15) return;
+    camObsDir.normalize();
+
+    camObsRay.set(targetPos, camObsDir);
+    camObsRay.near = 0.25;
+    camObsRay.far = desiredDist;
+    const hits = camObsRay.intersectObjects(built.clickableMeshes, false);
+    for (let i = 0; i < hits.length; i++) {
+      const h = hits[i];
+      if (h.object.userData && (h.object.userData.isSign || h.object.userData.isParapet || h.object.userData.isStair || h.object.userData.isRail)) continue;
+      if (isInWingDEastCorridorOrStair(targetPos.x, targetPos.z) && h.object.userData && h.object.userData.buildingId === "tennis_toilet") continue;
+      // 忽略地板與平天花板水平面
+      if (h.face && Math.abs(h.face.normal.y) > 0.70) continue;
+      // 忽略女兒牆、樓梯欄杆矮牆與扶手（高度小於 1.55m，外側為開放空間，由 updateCameraLineOfSightCulling 自動透視，不壓迫鏡頭距離）
+      let meshH = 0;
+      if (h.object.geometry && h.object.geometry.parameters && typeof h.object.geometry.parameters.height === "number") {
+        meshH = h.object.geometry.parameters.height;
+      } else if (h.object.geometry) {
+        if (!h.object.geometry.boundingBox) h.object.geometry.computeBoundingBox();
+        if (h.object.geometry.boundingBox) {
+          meshH = h.object.geometry.boundingBox.max.y - h.object.geometry.boundingBox.min.y;
+        }
+      }
+      if (meshH > 0 && meshH < 1.55) continue;
+      // 忽略走廊細小支撐柱（寬與深均小於 0.55m，由 updateCameraLineOfSightCulling 自動透視，確保停止視角維持中景不放大）
+      if (h.object.geometry && h.object.geometry.parameters) {
+        const gp = h.object.geometry.parameters;
+        if (typeof gp.width === "number" && typeof gp.depth === "number" && gp.width <= 0.55 && gp.depth <= 0.55) continue;
+      }
+      // 遇到實體牆壁/柱子/端牆：縮小鏡頭距離，讓鏡頭保持在牆壁內側前方（保留 0.22m 安全空間）
+      const clampedDist = Math.max(minDistance, h.distance - 0.22);
+      if (clampedDist < desiredDist) {
+        desiredCamPos.copy(targetPos).addScaledVector(camObsDir, clampedDist);
+        break;
+      }
+    }
+  }
+
+  function updateBuildingOcclusionOpacity() {
+    restoreCulledLensMeshes();
+  }
 
   const walkerGroup = new THREE.Group();
   const walkerParts = {};
@@ -1047,14 +1458,135 @@
     return { lx: dx * c - dz * s, lz: dx * s + dz * c };
   }
 
+  function toBuildingWorld(b, lx, lz) {
+    const c = Math.cos(b.rotY || 0);
+    const s = Math.sin(b.rotY || 0);
+    return {
+      x: b.x + lx * c + lz * s,
+      z: b.z - lx * s + lz * c
+    };
+  }
+
+  // 檢查座標 (nx, nz) 是否位於校園 1.5m 邊界外牆內側（且距離任一圍牆邊線至少 margin 公尺，防範小人不小心走出校外）
+  function isInsideCampusBoundary(nx, nz, margin = 0.45) {
+    // 若位於香蕉園落葉循環示範區通道，豁免邊界最短距離阻擋，讓小人可自由靠近
+    if (Math.hypot(nx - (-58.5), nz - 92.5) < 7.2) return true;
+    const poly = D.campusBoundary;
+    if (!poly || poly.length < 3) return true;
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i][0], zi = poly[i][1];
+      const xj = poly[j][0], zj = poly[j][1];
+      const intersect = ((zi > nz) !== (zj > nz)) && (nx < (xj - xi) * (nz - zi) / ((zj - zi) || 1e-9) + xi);
+      if (intersect) inside = !inside;
+
+      // 若為校門口通道區段 (南側門柱外緣 [56.63, 44.89] 至 北側門柱外緣 [63.83, 35.79])，豁免邊界圍牆最短距離阻擋，使通道保持開放通暢
+      const isGateSeg =
+        (Math.hypot(xi - 56.63, zi - 44.89) < 1.5 && Math.hypot(xj - 63.83, zj - 35.79) < 1.5) ||
+        (Math.hypot(xj - 56.63, zj - 44.89) < 1.5 && Math.hypot(xi - 63.83, zi - 35.79) < 1.5);
+      if (isGateSeg) continue;
+
+      // 計算點到圍牆線段之最短距離，確保無法貼穿 1.5m 邊界外牆
+      const vx = xj - xi, vz = zj - zi;
+      const lenSq = vx * vx + vz * vz;
+      if (lenSq > 1e-4) {
+        const t = Math.max(0, Math.min(1, ((nx - xi) * vx + (nz - zi) * vz) / lenSq));
+        const px = xi + t * vx, pz = zi + t * vz;
+        if (Math.hypot(nx - px, nz - pz) < margin) return false;
+      }
+    }
+    return inside;
+  }
+
   function isBlocked(nx, nz, curY = 0) {
-    const curFloor = curY > 2.0 ? "2" : "1";
+    if (!isInsideCampusBoundary(nx, nz, 0.45)) return true;
+
+    // 若位於 D 棟南端迴轉樓梯區內，豁免網球廁所跨棟重疊碰撞，確保 D 棟樓梯上下行完全暢通
+    const bD = D.buildings.find(item => item.id === "bldg_d");
+    let inDStairZone = false;
+    if (bD) {
+      const dLoc = toBuildingLocal(bD, nx, nz);
+      if (dLoc.lx >= 0.85 && dLoc.lx <= 4.65 && dLoc.lz >= 8.90 && dLoc.lz <= 13.0) {
+        inDStairZone = true;
+      }
+    }
+
+    // 全校樓梯嚴格幾何邊界保護（curY: 0.30 ~ 3.55m 階梯過渡區）：
+    // 嚴禁穿透外側牆體、女兒牆欄杆與階梯分隔牆，徹底根除出模掉入其他建築物或卡在外部窗沿之問題
+    const bA = D.buildings.find(item => item.id === "bldg_a");
+    if (bA && curY >= 0.30 && curY <= 3.55) {
+      const aLoc = toBuildingLocal(bA, nx, nz);
+      // 1. A 棟西側樓梯 + D 棟南側連通樓梯 (lx_A: -35.76 .. -32.16, lz_A: -5.17 .. 1.42，共用連通迴轉平台無北牆隔斷)
+      if (aLoc.lx >= -36.50 && aLoc.lx <= -31.50 && aLoc.lz >= -5.30 && aLoc.lz <= 2.20) {
+        if (aLoc.lx < -35.68) return true; // 西側緊鄰網球/性平廁所之共用外牆
+        if (aLoc.lx > -32.22) return true; // 東側緊鄰 A 棟教室之外牆
+        if (aLoc.lz >= -1.35) {
+          if (curY < 1.50 && aLoc.lx > -34.02) return true; // A棟 Flight 1 下半段 (不可跨牆)
+          if (curY > 2.15 && aLoc.lx < -33.90) return true; // A棟 Flight 2 上半段 (平台銜接區暢通無阻)
+        }
+      }
+      // 2. A 棟中央玄關西側雙折樓梯 (lx: -6.23 .. -2.23, lz: 4.87 .. 8.47)
+      if (aLoc.lx >= -7.20 && aLoc.lx <= -1.80 && aLoc.lz >= 4.20 && aLoc.lz <= 9.20) {
+        if (aLoc.lz < 4.88) return true; // 北側外緣女兒牆/扶手（嚴格防穿模）
+        if (aLoc.lz > 8.46) return true; // 南側外緣女兒牆/扶手
+        if (aLoc.lx < -6.18) return true; // 迴轉平台西側背牆
+        if (aLoc.lx >= -4.85) {
+          if (curY < 1.50 && aLoc.lz < 6.72) return true; // Flight 1 下半段
+          if (curY > 2.15 && aLoc.lz > 6.62) return true; // Flight 2 上半段（平台轉向 1.50~2.15 暢通無阻）
+        }
+      }
+      // 3. A 棟中央玄關東側雙折樓梯 (pMaxA = 2.87 -> lx: 2.92 .. 6.92, lz: 4.87 .. 8.47)
+      if (aLoc.lx >= 2.50 && aLoc.lx <= 7.40 && aLoc.lz >= 4.20 && aLoc.lz <= 9.20) {
+        if (aLoc.lz < 4.88) return true; // 北側外緣女兒牆/扶手
+        if (aLoc.lz > 8.46) return true; // 南側外緣女兒牆/扶手
+        if (aLoc.lx > 6.86) return true; // 迴轉平台東側背牆
+        if (aLoc.lx <= 5.55) {
+          if (curY < 1.50 && aLoc.lz < 6.72) return true;
+          if (curY > 2.15 && aLoc.lz > 6.62) return true;
+        }
+      }
+    }
+
+    const bB = D.buildings.find(item => item.id === "bldg_b");
+    if (bB && curY >= 0.30 && curY <= 3.55) {
+      const bLoc = toBuildingLocal(bB, nx, nz);
+      // B 棟西側樓梯 (lx: -35.70 .. -32.10, lz: -4.17 .. 1.42)
+      if (bLoc.lx >= -36.50 && bLoc.lx <= -31.00 && bLoc.lz >= -5.00 && bLoc.lz <= 2.20) {
+        if (bLoc.lx < -35.65 || bLoc.lx > -32.15 || bLoc.lz < -4.12) return true;
+      }
+      // B 棟中央樓梯 (lx: -2.70 .. 0.90, lz: -4.17 .. 1.42)
+      if (bLoc.lx >= -3.50 && bLoc.lx <= 1.80 && bLoc.lz >= -5.00 && bLoc.lz <= 2.20) {
+        if (bLoc.lx < -2.65 || bLoc.lx > 0.85 || bLoc.lz < -4.12) return true;
+      }
+    }
+
+    const bC = D.buildings.find(item => item.id === "bldg_c");
+    if (bC && curY >= 0.30 && curY <= 3.55) {
+      const cLoc = toBuildingLocal(bC, nx, nz);
+      // C 棟雙折樓梯 (lx: -3.64 .. 1.16, lz: 15.52 .. 19.10)
+      if (cLoc.lx >= -4.50 && cLoc.lx <= 2.00 && cLoc.lz >= 14.80 && cLoc.lz <= 20.0) {
+        if (cLoc.lx < -3.60 || cLoc.lx > 1.12 || cLoc.lz > 19.05) return true;
+      }
+    }
+
+    const curFloor = curY > 1.60 ? "2" : "1";
     const cols = built.colliders || [];
-    const pad = 0.26;
     for (let i = 0; i < cols.length; i++) {
       const col = cols[i];
+      if (inDStairZone && col.b.id === "tennis_toilet") continue;
       if (col.floors !== "both" && col.floors !== curFloor) continue;
       const { lx, lz } = toBuildingLocal(col.b, nx, nz);
+      if (col.isPillar) {
+        // 柱體碰撞採用圓形半徑與適當緩衝 (pr + 0.35m)，確保小人從任何角度走近立柱時外緣緊貼停住，徹底杜絕穿模
+        const cx = (col.lxMin + col.lxMax) / 2;
+        const cz = (col.lzMin + col.lzMax) / 2;
+        const pr = Math.max((col.lxMax - col.lxMin) / 2, (col.lzMax - col.lzMin) / 2);
+        if (Math.hypot(lx - cx, lz - cz) < pr + 0.35) {
+          return true;
+        }
+        continue;
+      }
+      const pad = 0.22;
       if (lx >= col.lxMin - pad && lx <= col.lxMax + pad && lz >= col.lzMin - pad && lz <= col.lzMax + pad) {
         return true;
       }
@@ -1063,12 +1595,12 @@
       const trees = built.treeColliders || [];
       for (let i = 0; i < trees.length; i++) {
         const tc = trees[i];
-        if (Math.hypot(nx - tc.x, nz - tc.z) < tc.r) return true;
+        if (Math.hypot(nx - tc.x, nz - tc.z) < tc.r * 0.85) return true;
       }
       const extras = built.extraWorldColliders || [];
       for (let i = 0; i < extras.length; i++) {
         const ec = extras[i];
-        if (Math.hypot(nx - ec.x, nz - ec.z) < ec.r) return true;
+        if (Math.hypot(nx - ec.x, nz - ec.z) < ec.r * 0.85) return true;
       }
     }
     if (curY < 2.0) {
@@ -1076,11 +1608,12 @@
         const b = D.buildings[i];
         if (b.noCollide || (b.style && b.style.startsWith("wing_")) || b.style === "corridor" ||
             b.style === "track" || b.style === "mural3d" || b.style === "banana" || b.style === "toilet" ||
-            b.style === "samba" || b.style === "playground" || b.style === "gate" || b.style === "pond" || b.style === "solar_court") {
+            b.style === "samba" || b.style === "playground" || b.style === "gate" || b.style === "pond" ||
+            b.style === "solar_court" || b.style === "stage") {
           continue;
         }
         const { lx, lz } = toBuildingLocal(b, nx, nz);
-        if (Math.abs(lx) < b.w / 2 + 0.22 && Math.abs(lz) < b.d / 2 + 0.22) {
+        if (Math.abs(lx) < b.w / 2 + 0.20 && Math.abs(lz) < b.d / 2 + 0.20) {
           return true;
         }
       }
@@ -1088,14 +1621,226 @@
     return false;
   }
 
+  // 高齡友善智慧移動解算器：
+  // 1. 全角度切線滑牆與自動繞柱（解決 30° 斜向校舍因世界 X/Z 分軸碰撞造成的斜推走歪與撞柱卡死）
+  // 2. 走廊與樓梯智慧直線導正 + 走廊中線防撞導引（稍微走偏時自動順著走廊方向導正並遠離柱列）
+  const SLIDE_ANGLES = [0.22, -0.22, 0.44, -0.44, 0.68, -0.68, 0.92, -0.92, 1.18, -1.18, 1.42, -1.42];
+  function moveWalkerSmoothly(stepX, stepZ, curY, dt, isUserTurning) {
+    const stepLen = Math.hypot(stepX, stepZ);
+    if (stepLen < 1e-5) return 0;
+
+    // A. 先嘗試原方向直接前進
+    const directX = walkState.x + stepX;
+    const directZ = walkState.z + stepZ;
+    let movedX = walkState.x, movedZ = walkState.z;
+    let slideDeflect = 0;
+    let didMove = false;
+
+    if (!isBlocked(directX, directZ, curY)) {
+      movedX = directX;
+      movedZ = directZ;
+      didMove = true;
+    } else {
+      // B. 若前方受阻（如斜擦牆面、欄杆或柱子），沿切線角度陣列自動尋找最順暢的滑動方向，絕不卡死或亂彈
+      const baseHeading = Math.atan2(-stepX, -stepZ);
+      for (let i = 0; i < SLIDE_ANGLES.length; i++) {
+        const da = SLIDE_ANGLES[i];
+        const testYaw = baseHeading + da;
+        const scale = Math.max(0.45, Math.cos(da));
+        const tx = walkState.x - Math.sin(testYaw) * stepLen * scale;
+        const tz = walkState.z - Math.cos(testYaw) * stepLen * scale;
+        if (!isBlocked(tx, tz, curY)) {
+          movedX = tx;
+          movedZ = tz;
+          slideDeflect = da;
+          didMove = true;
+          break;
+        }
+      }
+    }
+
+    if (!didMove) return 0;
+    walkState.x = movedX;
+    walkState.z = movedZ;
+
+    // 若因擦撞柱子或牆面產生切線滑動，溫和順向微調朝向，協助使用者自然繞過障礙
+    if (Math.abs(slideDeflect) > 0.01 && !isUserTurning && !guidedWalk) {
+      const nudge = THREE.MathUtils.clamp(slideDeflect * 0.14, -0.04, 0.04);
+      walkState.yaw += nudge;
+      camState.yaw += nudge;
+    }
+
+    // C. 走廊與連廊智慧直線導正 & 走廊中線防撞柱輔助（僅在未主動轉彎且正向行走時啟動）
+    if (!isUserTurning && !guidedWalk && !clickWalkTarget) {
+      applyCorridorLaneAssist(dt);
+    }
+
+    return Math.hypot(walkState.x - (directX - stepX), walkState.z - (directZ - stepZ));
+  }
+
+  function normalizeAngleDiff(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
+  }
+
+  function applyCorridorLaneAssist(dt) {
+    for (let i = 0; i < D.buildings.length; i++) {
+      const b = D.buildings[i];
+      if (!((b.style && b.style.startsWith("wing_")) || b.style === "corridor")) continue;
+      const { lx, lz } = toBuildingLocal(b, walkState.x, walkState.z);
+      const rot = b.rotY || 0;
+
+      // 1. A 棟與 B 棟東西向長走廊 (走廊位於南側 lz: 1.42 .. b.d/2)
+      if (b.id === "bldg_a" || b.id === "bldg_b") {
+        const wallZ = b.d / 2 - 3.1;
+        const outerZ = b.d / 2;
+        if (lx >= -b.w / 2 - 0.5 && lx <= b.w / 2 + 1.5 && lz >= wallZ - 0.15 && lz <= outerZ + 0.25) {
+          // 走廊軸向為局部 +X (yaw = rot - PI/2) 或局部 -X (yaw = rot + PI/2)
+          const axisYawPos = rot - Math.PI / 2;
+          const axisYawNeg = rot + Math.PI / 2;
+          const dPos = normalizeAngleDiff(axisYawPos - walkState.yaw);
+          const dNeg = normalizeAngleDiff(axisYawNeg - walkState.yaw);
+          const bestDiff = Math.abs(dPos) < Math.abs(dNeg) ? dPos : dNeg;
+
+          // 若行進角度與走廊直線方向夾角在 24 度 (0.42 rad) 內，自動平滑導正為直線，並溫和推向走廊中央安全線 (避開外緣柱列)
+          if (Math.abs(bestDiff) < 0.42) {
+            const alignStep = bestDiff * Math.min(1, 4.2 * dt);
+            walkState.yaw += alignStep;
+            camState.yaw += alignStep;
+
+            // 走廊安全中線約在 wallZ + 1.45m（遠離 outerZ - 0.2m 的柱列與 wallZ 牆面）
+            const safeCenterZ = wallZ + 1.45;
+            const latErr = safeCenterZ - lz;
+            if (Math.abs(latErr) > 0.25) {
+              const newLz = lz + THREE.MathUtils.clamp(latErr * 2.2 * dt, -0.04, 0.04);
+              const wPt = toBuildingWorld(b, lx, newLz);
+              if (!isBlocked(wPt.x, wPt.z, walkState.y)) {
+                walkState.x = wPt.x;
+                walkState.z = wPt.z;
+              }
+            }
+          }
+          return;
+        }
+      }
+
+      // 2. C-Show 創客走廊 / 中央風雨連廊 (南北向 lz: -b.d/2 .. +b.d/2, 寬度 lx: -b.w/2 .. +b.w/2)
+      if (b.id === "corridor_mid") {
+        if (Math.abs(lx) <= b.w / 2 - 0.1 && Math.abs(lz) <= b.d / 2 - 0.8) {
+          const axisYawNorth = rot;
+          const axisYawSouth = rot + Math.PI;
+          const dN = normalizeAngleDiff(axisYawNorth - walkState.yaw);
+          const dS = normalizeAngleDiff(axisYawSouth - walkState.yaw);
+          const bestDiff = Math.abs(dN) < Math.abs(dS) ? dN : dS;
+          if (Math.abs(bestDiff) < 0.42) {
+            const alignStep = bestDiff * Math.min(1, 4.5 * dt);
+            walkState.yaw += alignStep;
+            camState.yaw += alignStep;
+            if (Math.abs(lx) > 0.35) {
+              const newLx = lx * (1 - Math.min(0.5, 2.2 * dt));
+              const wPt = toBuildingWorld(b, newLx, lz);
+              if (!isBlocked(wPt.x, wPt.z, walkState.y)) {
+                walkState.x = wPt.x;
+                walkState.z = wPt.z;
+              }
+            }
+          }
+          return;
+        }
+      }
+
+      // 3. C 棟與 D 棟南北向走廊
+      if (b.id === "bldg_c" || b.id === "bldg_d") {
+        if (Math.abs(lx) <= b.w / 2 + 0.2 && Math.abs(lz) <= b.d / 2 + 1.0) {
+          const axisYawNorth = rot;
+          const axisYawSouth = rot + Math.PI;
+          const dN = normalizeAngleDiff(axisYawNorth - walkState.yaw);
+          const dS = normalizeAngleDiff(axisYawSouth - walkState.yaw);
+          const bestDiff = Math.abs(dN) < Math.abs(dS) ? dN : dS;
+          if (Math.abs(bestDiff) < 0.38) {
+            const alignStep = bestDiff * Math.min(1, 4.0 * dt);
+            walkState.yaw += alignStep;
+            camState.yaw += alignStep;
+            // D 棟東側走廊安全中線導引（1F/2F 上樓與下樓時平穩保持在走廊/梯道中央）
+            if (b.id === "bldg_d" && lx > 1.35) {
+              const goingSouth = Math.abs(dS) < Math.abs(dN);
+              const safeX = (walkState.y > 2.0 && goingSouth && lz > 3.5) ? 2.22 : 4.25;
+              const latErr = safeX - lx;
+              if (Math.abs(latErr) > 0.22) {
+                const newLx = lx + THREE.MathUtils.clamp(latErr * 2.4 * dt, -0.045, 0.045);
+                const wPt = toBuildingWorld(b, newLx, lz);
+                if (!isBlocked(wPt.x, wPt.z, walkState.y)) {
+                  walkState.x = wPt.x;
+                  walkState.z = wPt.z;
+                }
+              }
+            }
+          }
+          return;
+        }
+      }
+    }
+  }
+
+  function isInWingAPortalStairs(wx, wz) {
+    const bA = D.buildings.find(item => item.id === "bldg_a");
+    if (!bA) return false;
+    const { lx, lz } = toBuildingLocal(bA, wx, wz);
+    return lx >= -6.75 && lx <= 7.15 && lz >= 3.60 && lz <= 10.60;
+  }
+
+  function isInWingDEastCorridorOrStair(wx, wz) {
+    const bD = D.buildings.find(item => item.id === "bldg_d");
+    if (bD) {
+      const { lx, lz } = toBuildingLocal(bD, wx, wz);
+      if (lx >= 0.85 && lx <= bD.w / 2 + 0.45 && lz >= -bD.d / 2 - 2.4 && lz <= bD.d / 2 + 5.8) return true;
+    }
+    const bA = D.buildings.find(item => item.id === "bldg_a");
+    if (bA) {
+      const { lx, lz } = toBuildingLocal(bA, wx, wz);
+      if (lx >= -36.50 && lx <= -31.50 && lz >= -5.50 && lz <= 2.50) return true;
+    }
+    return false;
+  }
+
+  function isAvatarInStairZone(wx, wz) {
+    if (isInWingAPortalStairs(wx, wz)) return true;
+    const bD = D.buildings.find(item => item.id === "bldg_d");
+    if (bD) {
+      const { lx, lz } = toBuildingLocal(bD, wx, wz);
+      if (lx >= 1.15 && lx <= 4.85 && lz >= bD.d / 2 - 0.8 && lz <= bD.d / 2 + 4.1) return true;
+    }
+    const zones = (built && built.walkZones) || [];
+    for (let i = 0; i < zones.length; i++) {
+      const z = zones[i];
+      if (!z.isStair) continue;
+      const { lx, lz } = toBuildingLocal(z.b, wx, wz);
+      const margin = 0.35;
+      if (lx >= z.lxMin - margin && lx <= z.lxMax + margin && lz >= z.lzMin - margin && lz <= z.lzMax + margin) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  let wasOnFloor2ForStair = false;
+  let isDescendingStairs = false;
+
   function getWalkElevation(wx, wz, curY) {
     const zones = built.walkZones || [];
-    let bestY = null;
-    let bestDiff = Infinity;
+    // 優先匹配斜坡／樓梯台階區 (rampAxis !== null)，避免在 2F 樓梯口下樓時被鄰接的 2F 走廊平面鎖在半空中
+    let bestRampY = null;
+    let bestRampDiff = Infinity;
+    let bestFlatY = null;
+    let bestFlatDiff = Infinity;
+
     for (let i = 0; i < zones.length; i++) {
       const z = zones[i];
       const { lx, lz } = toBuildingLocal(z.b, wx, wz);
-      if (lx < z.lxMin - 0.35 || lx > z.lxMax + 0.35 || lz < z.lzMin - 0.35 || lz > z.lzMax + 0.35) continue;
+      const isRamp = !!z.rampAxis;
+      const margin = isRamp ? 0.14 : 0.22;
+      if (lx < z.lxMin - margin || lx > z.lxMax + margin || lz < z.lzMin - margin || lz > z.lzMax + margin) continue;
       let ty = z.y0;
       if (z.rampAxis === "x") {
         const t = Math.max(0, Math.min(1, (lx - z.lxMin) / (z.lxMax - z.lxMin)));
@@ -1105,12 +1850,20 @@
         ty = z.y0 + (z.y1 - z.y0) * t;
       }
       const diff = Math.abs(ty - curY);
-      if (diff <= 1.45 && diff < bestDiff) {
-        bestDiff = diff;
-        bestY = ty;
+      if (isRamp) {
+        if (diff <= 1.55 && diff < bestRampDiff) {
+          bestRampDiff = diff;
+          bestRampY = ty;
+        }
+      } else {
+        if (diff <= 1.45 && diff < bestFlatDiff) {
+          bestFlatDiff = diff;
+          bestFlatY = ty;
+        }
       }
     }
-    return bestY !== null ? bestY : 0;
+    if (bestRampY !== null) return bestRampY;
+    return bestFlatY !== null ? bestFlatY : 0;
   }
 
   function isInsideCorridorRoof(wx, wz) {
@@ -1118,7 +1871,10 @@
       const b = D.buildings[i];
       if (!((b.style && b.style.startsWith("wing_")) || b.style === "corridor")) continue;
       const { lx, lz } = toBuildingLocal(b, wx, wz);
-      if (Math.abs(lx) < b.w / 2 + 0.6 && Math.abs(lz) < b.d / 2 + 0.6) return true;
+      const minExtraZ = b.id === "bldg_d" ? 2.4 : 0.6;
+      const extraZ = b.id === "bldg_a" ? 4.2 : (b.id === "bldg_c" ? 5.2 : (b.id === "bldg_d" ? 4.1 : 0.6));
+      const extraX = b.id === "bldg_a" ? 2.0 : 0.6;
+      if (Math.abs(lx) < b.w / 2 + extraX && lz > -b.d / 2 - minExtraZ && lz < b.d / 2 + extraZ) return true;
     }
     return false;
   }
@@ -1128,10 +1884,28 @@
     walkMode = true;
     flyAnim = null;
     if (spawn) {
-      walkState.x = spawn.x; walkState.z = spawn.z; walkState.y = spawn.y || 0; walkState.yaw = spawn.yaw || 0;
+      walkState.x = spawn.x; walkState.z = spawn.z;
+      walkState.y = typeof spawn.y === "number" ? spawn.y : getWalkElevation(spawn.x, spawn.z, 0);
+      walkState.yaw = spawn.yaw || 0;
     } else {
       walkState.y = getWalkElevation(walkState.x, walkState.z, walkState.y);
     }
+    autoOrbitActive = false;
+    autoOrbitBuilding = null;
+    camAzVel = 0;
+    lastKeySig = "";
+    walkZoomTween = null;
+    walkOrbitVelYaw = 0;
+    walkOrbitVelPitch = 0;
+    smoothCamLiftY = 0;
+    walkFollowDist = 3.5;
+    wasOnFloor2ForStair = (walkState.y >= 2.85);
+    isDescendingStairs = false;
+    camState.target.set(walkState.x, walkState.y + 1.38, walkState.z);
+    camState.yaw = walkState.yaw;
+    camState.pitch = 0.20;
+    camState.dist = walkFollowDist;
+    applyCamera();
     document.getElementById("walkHudBar").hidden = false;
     document.getElementById("walkModeBtn").classList.add("active");
     document.getElementById("walkJoystick").classList.add("visible");
@@ -1143,6 +1917,13 @@
   function exitWalkMode() {
     walkMode = false;
     guidedWalk = null;
+    autoOrbitActive = false;
+    autoOrbitBuilding = null;
+    camAzVel = 0;
+    lastKeySig = "";
+    walkZoomTween = null;
+    isUserOrbiting = false;
+    updateBuildingOcclusionOpacity(new Set(), 1.0);
     walkState.vy = 0;
     walkState.jumping = false;
     walkerGroup.visible = false;
@@ -1163,13 +1944,22 @@
     exitWalkMode();
   }
 
-  function startGuidedWalk(pts, startLabel, endLabel, totalDist, secs, endBid) {
+  function startGuidedWalk(pts, startLabel, endLabel, totalDist, secs, endBid, endInfo) {
     clickWalkTarget = null;
-    enterWalkMode({ x: pts[0].x, z: pts[0].z, yaw: Math.atan2(pts[0].x - pts[1].x, pts[0].z - pts[1].z) });
+    enterWalkMode({ x: pts[0].x, z: pts[0].z, y: pts[0].y, yaw: Math.atan2(pts[0].x - pts[1].x, pts[0].z - pts[1].z) });
     document.getElementById("walkHudBar").hidden = true; // 模擬帶路時顯示專用帶路面板
+    if (navRouteGroup) {
+      navRouteGroup.traverse(obj => {
+        if (obj.userData && obj.userData.isStartPin) obj.visible = false;
+      });
+    }
     guidedWalk = {
       pts, idx: 1, totalDist: totalDist || 1, traveled: 0,
-      paused: false, speed: 1, topView: false, endBid: endBid || null
+      paused: false, speed: 1, topView: false, endBid: endBid || null,
+      isRoom: !!(endInfo && endInfo.isRoom),
+      is2F: !!(endInfo && endInfo.is2F),
+      enteredBuilding: false,
+      facingYaw: (endInfo && typeof endInfo.facingYaw === "number") ? endInfo.facingYaw : null
     };
     const bar = document.getElementById("guideControlBar");
     bar.hidden = false;
@@ -1270,8 +2060,16 @@
     const dist = Math.hypot(dx, dy);
     if (dist > maxR) { dx = dx * maxR / dist; dy = dy * maxR / dist; }
     joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-    joyInput.fwd = -dy / maxR;
-    joyInput.turn = -dx / maxR;
+    const rawFwd = -dy / maxR;
+    const rawTurn = -dx / maxR;
+    // 高齡友善搖桿直線死區：往前或往後推時，若左右偏移小於 28%，自動鎖定為直線行走不偏斜
+    joyInput.fwd = Math.abs(rawFwd) < 0.12 ? 0 : rawFwd;
+    if (Math.abs(rawTurn) < 0.26) {
+      joyInput.turn = 0;
+    } else {
+      const normT = (Math.abs(rawTurn) - 0.26) / 0.74;
+      joyInput.turn = Math.sign(rawTurn) * normT * Math.pow(normT, 0.35) * 0.78;
+    }
   }
   function resetJoy() {
     joyActive = false;
@@ -1491,6 +2289,7 @@
       fbDb.collection("campus").doc("schoolYearOverrides").get().then(doc => {
         if (doc.exists && doc.data()) {
           const ov = doc.data();
+          sanitizeOverrideRooms(ov);
           localStorage.setItem(ADMIN_DATA_KEY, JSON.stringify(ov));
           D.buildings.forEach(b => { if (ov[b.id]) Object.assign(b, ov[b.id]); });
           populateNavSelects();
@@ -1517,11 +2316,26 @@
       fbDb.collection("campus").doc("adminUsers").set({ list: arr }).catch(e => alert("雲端同步失敗：" + e.message));
     }
   }
+  function sanitizeOverrideRooms(ov) {
+    if (!ov || typeof ov !== "object") return;
+    Object.values(ov).forEach(bOv => {
+      if (!bOv || !bOv.floorsData) return;
+      Object.values(bOv.floorsData).forEach(list => {
+        if (!Array.isArray(list)) return;
+        list.forEach(r => {
+          if (r && (r.name === "綜合教室(一)／夜光天使" || r.name === "綜合教室(一)/夜光天使" || r.name === "夜光天使/綜(一)")) {
+            r.name = "夜光天使/綜(二)";
+          }
+        });
+      });
+    });
+  }
   function applyAdminOverrides() {
     try {
       const raw = localStorage.getItem(ADMIN_DATA_KEY);
       if (!raw) return;
       const ov = JSON.parse(raw);
+      sanitizeOverrideRooms(ov);
       D.buildings.forEach(b => {
         if (ov[b.id]) Object.assign(b, ov[b.id]);
       });
@@ -1847,8 +2661,96 @@
   };
 
   // --- 9. 主動畫迴圈 ---
+  function updateWalkOrbitControls(dt, now) {
+    if (Math.abs(walkOrbitVelYaw) > 1e-5 || Math.abs(walkOrbitVelPitch) > 1e-5) {
+      camState.yaw += walkOrbitVelYaw;
+      camState.pitch += walkOrbitVelPitch;
+      const damp = Math.exp(-18 * dt);
+      walkOrbitVelYaw *= damp;
+      walkOrbitVelPitch *= damp;
+      if (Math.abs(walkOrbitVelYaw) < 1e-5) walkOrbitVelYaw = 0;
+      if (Math.abs(walkOrbitVelPitch) < 1e-5) walkOrbitVelPitch = 0;
+    }
+    const indoor = walkState.y > 0.2 || isInsideCorridorRoof(walkState.x, walkState.z);
+    if (walkZoomTween) {
+      const p = Math.min(1, (now - walkZoomTween.t0) / walkZoomTween.dur);
+      const ease = 1 - Math.pow(1 - p, 3);
+      walkFollowDist = walkZoomTween.startDist + (walkZoomTween.endDist - walkZoomTween.startDist) * ease;
+      if (p >= 1) walkZoomTween = null;
+    }
+    // 室內/走廊平滑限制俯仰角，避免進入走廊瞬間角度跳動並確保攝影機位於天花板下方跟隨小人；若為下樓高處鳥瞰則開放鳥瞰俯仰角 (1.30)
+    // 若在樓梯仰角跟拍區，開放低角度仰拍 (minPitch = -0.15)
+    const inStairArea = isInWingAPortalStairs(walkState.x, walkState.z) || isInWingDEastCorridorOrStair(walkState.x, walkState.z) || isAvatarInStairZone(walkState.x, walkState.z);
+    const maxPitch = isDescendingStairs ? 1.30 : (indoor ? 0.34 : 1.25);
+    const minPitch = (inStairArea && !isDescendingStairs) ? -0.15 : (walkMode ? -0.08 : 0.06);
+    if (camState.pitch > maxPitch) {
+      camState.pitch += (maxPitch - camState.pitch) * (1 - Math.exp(-8 * dt));
+    } else if (camState.pitch < minPitch) {
+      camState.pitch = minPitch;
+    }
+  }
+
+  // 全校樓梯行走嚴格包絡面防護夾緊器（雙重防穿模）：
+  // 在小人攀爬樓梯與平台期間 (0.30m <= y <= 3.55m)，嚴格夾緊小人於安全梯道與轉折平台內，絕不碰到牆體或扶手穿模
+  function clampAvatarToStairEnclosure() {
+    if (walkState.y < 0.30 || walkState.y > 3.55) return;
+    const bA = D.buildings.find(item => item.id === "bldg_a");
+    if (bA) {
+      const aLoc = toBuildingLocal(bA, walkState.x, walkState.z);
+      // 1. A 棟西側樓梯 + D 棟南側連通樓梯 (lx_A: -35.76 .. -32.16, lz_A: -5.17 .. 1.42，共用迴轉平台可直通 D 棟樓梯)
+      if (aLoc.lx >= -36.50 && aLoc.lx <= -31.50 && aLoc.lz >= -5.20 && aLoc.lz <= 1.80) {
+        let nLx = THREE.MathUtils.clamp(aLoc.lx, -35.62, -32.28);
+        let nLz = aLoc.lz;
+        if (nLz >= -1.35) {
+          if (walkState.y < 1.50) nLx = Math.min(-34.06, nLx);
+          else if (walkState.y > 2.15) nLx = Math.max(-33.86, nLx);
+        }
+        if (Math.abs(nLx - aLoc.lx) > 1e-4) {
+          const w = toBuildingWorld(bA, nLx, nLz);
+          walkState.x = w.x; walkState.z = w.z;
+        }
+        return;
+      }
+      // 2. A 棟中央玄關西側雙折樓梯 (lx: -6.23 .. -2.23, lz: 4.87 .. 8.47)
+      if (aLoc.lx >= -6.80 && aLoc.lx <= -1.80 && aLoc.lz >= 4.40 && aLoc.lz <= 8.90) {
+        let nLz = THREE.MathUtils.clamp(aLoc.lz, 4.96, 8.38);
+        let nLx = Math.max(-6.12, aLoc.lx);
+        if (nLx >= -4.85) {
+          if (walkState.y < 1.50) nLz = Math.max(6.75, nLz);
+          else if (walkState.y > 2.15) nLz = Math.min(6.58, nLz);
+        }
+        if (Math.abs(nLx - aLoc.lx) > 1e-4 || Math.abs(nLz - aLoc.lz) > 1e-4) {
+          const w = toBuildingWorld(bA, nLx, nLz);
+          walkState.x = w.x; walkState.z = w.z;
+        }
+        return;
+      }
+      // 3. A 棟中央玄關東側雙折樓梯 (pMaxA = 2.87 -> lx: 2.92 .. 6.92, lz: 4.87 .. 8.47)
+      if (aLoc.lx >= 2.50 && aLoc.lx <= 7.30 && aLoc.lz >= 4.40 && aLoc.lz <= 8.90) {
+        let nLz = THREE.MathUtils.clamp(aLoc.lz, 4.96, 8.38);
+        let nLx = Math.min(6.80, aLoc.lx);
+        if (nLx <= 5.55) {
+          if (walkState.y < 1.50) nLz = Math.max(6.75, nLz);
+          else if (walkState.y > 2.15) nLz = Math.min(6.58, nLz);
+        }
+        if (Math.abs(nLx - aLoc.lx) > 1e-4 || Math.abs(nLz - aLoc.lz) > 1e-4) {
+          const w = toBuildingWorld(bA, nLx, nLz);
+          walkState.x = w.x; walkState.z = w.z;
+        }
+        return;
+      }
+    }
+  }
+
   function animate(now) {
     requestAnimationFrame(animate);
+    const dt = Math.min(0.05, Math.max(0.001, (now - lastAnimNow) / 1000));
+    lastAnimNow = now;
+
+    // 規格 1：先結算軌道控制（阻尼、縮放、仰角限制），再執行人物移動與跟隨鏡頭
+    if (walkMode && !walkFirstPerson && !guidedWalk) {
+      updateWalkOrbitControls(dt, now);
+    }
 
     // 動態路線前進箭頭
     if (routeCurve && routeArrows.length > 0) {
@@ -1857,56 +2759,106 @@
         const u = (a.offset + tBase) % 1;
         const p = routeCurve.getPointAt(u);
         const pNext = routeCurve.getPointAt(Math.min(1, u + 0.01));
-        a.mesh.position.set(p.x, 0.52, p.z);
-        a.mesh.lookAt(pNext.x, 0.52, pNext.z);
+        a.mesh.position.set(p.x, p.y + 0.27, p.z);
+        a.mesh.lookAt(pNext.x, pNext.y + 0.27, pNext.z);
       });
     }
 
     if (walkMode) {
+      const prevWalkX = walkState.x, prevWalkZ = walkState.z;
       let fwd = joyInput.fwd;
-      let turn = joyInput.turn * 0.04;
+      let turn = joyInput.turn * 0.028;
       let strafe = 0;
-      if (keys["w"] || keys["arrowup"]) fwd += 1;
-      if (keys["s"] || keys["arrowdown"]) fwd -= 0.7;
-      if (keys["a"]) strafe -= 0.85;
-      if (keys["d"]) strafe += 0.85;
-      if (keys["arrowleft"]) turn += 0.045;
-      if (keys["arrowright"]) turn -= 0.045;
 
-      // 點擊地面自動行走
+      // 判定是否從 2F 往下走樓梯（包含下到迴轉平台與下到 1F 地面）
+      const inStairNow = isAvatarInStairZone(walkState.x, walkState.z);
+      if (walkState.y >= 2.85) {
+        wasOnFloor2ForStair = true;
+        isDescendingStairs = false;
+      } else if (walkState.y <= 0.18) {
+        // 小人已下到 1F 地面，解除下樓鳥瞰，回復正常攝影機視角
+        wasOnFloor2ForStair = false;
+        isDescendingStairs = false;
+      } else if (wasOnFloor2ForStair && inStairNow) {
+        isDescendingStairs = true;
+      }
+
+      // WASD 之 W/S 與方向鍵 上/下 為前進後退；A/D 與方向鍵 左/右 為漸進式柔和左轉右轉（短按微調不轉過頭、長按順暢轉彎）
+      if (!guidedWalk) {
+        if (keys["w"] || keys["arrowup"]) fwd += 1;
+        if (keys["s"] || keys["arrowdown"]) fwd -= 0.75;
+        const turnLeft = !!(keys["a"] || keys["arrowleft"]);
+        const turnRight = !!(keys["d"] || keys["arrowright"]);
+        if (turnLeft || turnRight) {
+          walkState.turnHold = Math.min(1.0, (walkState.turnHold || 0) + dt * 2.2);
+          const turnRate = 0.015 + 0.015 * walkState.turnHold;
+          if (turnLeft) turn += turnRate;
+          if (turnRight) turn -= turnRate;
+        } else {
+          walkState.turnHold = 0;
+        }
+      }
+      const isUserTurning = Math.abs(turn) > 1e-4;
+      const useLockedKeyBasis = false;
+      const curKeySig = "";
+
+      // 點擊地面／走廊／樓梯自動尋路行走（具備自動繞柱與避障能力）
       if (clickWalkTarget && !guidedWalk) {
-        if (Math.abs(fwd) > 0.1 || Math.abs(strafe) > 0.1 || Math.abs(turn) > 0.01) {
+        if (curKeySig.length > 0 || Math.abs(fwd) > 0.1 || Math.abs(strafe) > 0.1 || isUserTurning) {
           clickWalkTarget = null;
         } else {
           const dx = clickWalkTarget.x - walkState.x, dz = clickWalkTarget.z - walkState.z;
           const d = Math.hypot(dx, dz);
-          if (d < 0.7) {
+          if (d < 0.55) {
             clickWalkTarget = null;
           } else {
-            walkState.yaw = Math.atan2(-dx, -dz);
-            fwd = 1;
+            let targetYaw = Math.atan2(-dx, -dz);
+            const probeDist = Math.min(d * 0.85, 0.55);
+            if (isBlocked(walkState.x - Math.sin(targetYaw) * probeDist, walkState.z - Math.cos(targetYaw) * probeDist, walkState.y)) {
+              for (let oi = 0; oi < SLIDE_ANGLES.length; oi++) {
+                const ty = targetYaw + SLIDE_ANGLES[oi];
+                if (!isBlocked(walkState.x - Math.sin(ty) * probeDist, walkState.z - Math.cos(ty) * probeDist, walkState.y)) {
+                  targetYaw = ty;
+                  break;
+                }
+              }
+            }
+            const yawDiff = normalizeAngleDiff(targetYaw - walkState.yaw);
+            walkState.yaw += yawDiff * Math.min(1, 10 * dt);
+            camState.yaw += yawDiff * Math.min(1, 4.5 * dt);
+            fwd = Math.min(1, Math.max(0.45, d * 0.7));
           }
         }
       }
+
+      const inStairFollowZone = isInWingAPortalStairs(walkState.x, walkState.z) || isInWingDEastCorridorOrStair(walkState.x, walkState.z) || inStairNow;
 
       // 模擬自動帶路 (鳥瞰跟隨 + 即將抵達切換垂直俯瞰)
       if (guidedWalk && !guidedWalk.paused && guidedWalk.idx < guidedWalk.pts.length) {
         const tgt = guidedWalk.pts[guidedWalk.idx];
         const dx = tgt.x - walkState.x, dz = tgt.z - walkState.z;
         const d = Math.hypot(dx, dz);
-        const arriveR = guidedWalk.idx === guidedWalk.pts.length - 1 ? 1.35 : 0.95;
+        const isLastPt = guidedWalk.idx === guidedWalk.pts.length - 1;
+        const arriveR = isLastPt ? 0.35 : 0.75;
         if (d < arriveR) {
+          if (isLastPt) {
+            walkState.x = tgt.x;
+            walkState.z = tgt.z;
+            walkState.y = getWalkElevation(walkState.x, walkState.z, walkState.y);
+          }
           guidedWalk.idx++;
           if (guidedWalk.idx >= guidedWalk.pts.length) {
             const destBid = guidedWalk.endBid;
+            const destIsRoom = guidedWalk.isRoom;
+            const destFacingYaw = guidedWalk.facingYaw;
             document.getElementById("guideProgressFill").style.width = "100%";
             guidedWalk = null;
             clearNavRoute();
             document.getElementById("guideControlBar").hidden = true;
-            // 保持人物站立於定點並轉向面對目的地正面，鏡頭切換為人物背後視角
+            // 保持人物站立於定點並轉向面對目的地門牌正面，鏡頭切換為人物背後清晰視角
             walkMode = true;
             walkFirstPerson = false;
-            walkFollowDist = 6.5;
+            walkFollowDist = destIsRoom ? 3.25 : 6.5;
             walkState.pitch = 0.06;
             walkerGroup.visible = true;
             document.getElementById("walkModeBtn").classList.add("active");
@@ -1915,41 +2867,69 @@
             const miniWrap = document.getElementById("minimapWrap");
             if (miniWrap && minimapEnabled) miniWrap.classList.add("visible");
             const destB = destBid ? D.buildings.find(item => item.id === destBid) : null;
-            if (destB) {
+            if (typeof destFacingYaw === "number") {
+              walkState.yaw = destFacingYaw;
+            } else if (destB) {
               const fdx = destB.x - walkState.x, fdz = destB.z - walkState.z;
               if (Math.hypot(fdx, fdz) > 0.2) walkState.yaw = Math.atan2(-fdx, -fdz);
+            }
+            if (destB && !destIsRoom) {
               selectedBuildingId = destB.id;
               renderDetailDrawer(destB);
+            } else {
+              detailDrawer.hidden = true;
             }
+            const arriveIndoor = walkState.y > 0.2 || isInsideCorridorRoof(walkState.x, walkState.z);
+            camState.target.set(walkState.x, walkState.y + (arriveIndoor ? 1.38 : 1.0), walkState.z);
+            camState.yaw = walkState.yaw;
+            camState.pitch = destIsRoom ? 0.08 : 0.28;
+            camState.dist = walkFollowDist;
+            applyCamera();
+            clampCameraObstruction(camState.target, camera.position, 1.05);
           }
         } else {
-          let steerYaw = Math.atan2(-dx, -dz);
-          const probeDist = Math.max(0.65, 0.22 * guidedWalk.speed * 2.5);
-          const tryOffsets = [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.85, -1.85];
-          for (let oi = 0; oi < tryOffsets.length; oi++) {
-            const testYaw = steerYaw + tryOffsets[oi];
-            const px = walkState.x - Math.sin(testYaw) * probeDist;
-            const pz = walkState.z - Math.cos(testYaw) * probeDist;
-            if (!isBlocked(px, pz, walkState.y)) {
-              steerYaw = testYaw;
-              break;
-            }
-          }
+          // 順暢朝向目標路徑點行進，不產生大幅偏航或折返擺動
+          const steerYaw = Math.atan2(-dx, -dz);
           walkState.yaw = steerYaw;
-          fwd = guidedWalk.speed;
+
+          // 帶路速度：
+          // 平地（操場、庭院、走廊、風雨連廊等）：100% 全速順暢前進（支援 1x 正常與 2x 快速，絕不延遲拖慢）
+          // 階梯段：僅在人物實際位於樓梯且爬升高度差大於 0.15m 時，稍微調至 0.82x 速度，步態穩健從容自然
+          const onActualStairs = (inStairNow && walkState.y > 0.18) || (Math.abs(tgt.y - walkState.y) > 0.15 && walkState.y > 0.18);
+          const stairSpeedFactor = onActualStairs ? 0.82 : 1.0;
+          const baseSpeed = guidedWalk.speed * stairSpeedFactor;
+          fwd = (isLastPt && d < 0.95) ? Math.min(baseSpeed, 0.70) : baseSpeed;
         }
       }
 
+      const frameScale = dt * 60;
+      turn *= frameScale;
       walkState.yaw += turn;
-      const moveSpd = 0.22 * fwd;
-      const strafeSpd = 0.22 * strafe;
-      if (Math.abs(moveSpd) > 0.005 || Math.abs(strafeSpd) > 0.005) {
-        const oldX = walkState.x, oldZ = walkState.z;
-        const nx = walkState.x - Math.sin(walkState.yaw) * moveSpd + Math.cos(walkState.yaw) * strafeSpd;
-        const nz = walkState.z - Math.cos(walkState.yaw) * moveSpd - Math.sin(walkState.yaw) * strafeSpd;
-        if (!isBlocked(nx, walkState.z, walkState.y)) walkState.x = nx;
-        if (!isBlocked(walkState.x, nz, walkState.y)) walkState.z = nz;
-        const movedStep = Math.hypot(walkState.x - oldX, walkState.z - oldZ);
+      if (walkMode && !walkFirstPerson && !guidedWalk && Math.abs(turn) > 1e-5) {
+        camState.yaw += turn;
+      }
+
+      // 若老師剛用滑鼠旋轉了觀看方向，按下前進 (W / ↑ / 搖桿往前) 時，讓小人平滑朝向畫面正前方前進（「看哪裡就往哪裡走」，直覺不走歪）
+      // 在樓梯與轉向梯道跟拍區中，小人自由轉向行進，攝影機在後方跟隨跟拍，不強行把小人拉回舊鏡頭視角
+      if (!guidedWalk && !clickWalkTarget && !walkFirstPerson && fwd > 0.05 && !isUserOrbiting && !inStairFollowZone) {
+        const camDiff = normalizeAngleDiff(camState.yaw - walkState.yaw);
+        if (Math.abs(camDiff) > 0.005) {
+          walkState.yaw += camDiff * Math.min(1, 10 * dt);
+        }
+      }
+
+      const moveSpd = 0.185 * fwd * frameScale;
+      const strafeSpd = 0.185 * strafe * frameScale;
+      let worldDx = 0, worldDz = 0;
+      let isMovingNow = false;
+      if (Math.abs(moveSpd) > 0.004 || Math.abs(strafeSpd) > 0.004) {
+        worldDx = -Math.sin(walkState.yaw) * moveSpd + Math.cos(walkState.yaw) * strafeSpd;
+        worldDz = -Math.cos(walkState.yaw) * moveSpd - Math.sin(walkState.yaw) * strafeSpd;
+        isMovingNow = true;
+      }
+
+      if (isMovingNow) {
+        const movedStep = moveWalkerSmoothly(worldDx, worldDz, walkState.y, dt, isUserTurning);
         if (guidedWalk && !guidedWalk.paused) {
           if (movedStep < 0.01) {
             guidedWalk.stuckCount = (guidedWalk.stuckCount || 0) + 1;
@@ -1970,7 +2950,7 @@
           walkState.y += (groundY - walkState.y) * 0.35;
           if (Math.abs(groundY - walkState.y) < 0.01) walkState.y = groundY;
         }
-        walkState.stepPhase += 0.22 * Math.max(1, Math.abs(fwd), Math.abs(strafe));
+        walkState.stepPhase += 0.22 * frameScale * Math.max(1, Math.abs(fwd), Math.abs(strafe));
         if (walkerParts.legL) {
           walkerParts.legL.rotation.x = Math.sin(walkState.stepPhase) * 0.55;
           walkerParts.legR.rotation.x = -Math.sin(walkState.stepPhase) * 0.55;
@@ -1998,19 +2978,86 @@
         }
       }
 
+      // 樓梯防護夾緊（確保小人絕對不越界出模）
+      clampAvatarToStairEnclosure();
+
       walkerGroup.position.set(walkState.x, walkState.y, walkState.z);
       walkerGroup.rotation.y = walkState.yaw;
 
+      if (navRouteGroup) {
+        // 依使用者指示：定位柱體（紅色終點柱、綠色起點柱）僅作內部計算，完全隱藏不呈現在使用者畫面中
+        navRouteGroup.traverse(obj => {
+          if (obj.userData && (obj.userData.isStartPin || obj.userData.isEndPin)) obj.visible = false;
+        });
+      }
+
       if (guidedWalk) {
-        const rem = Math.max(0, guidedWalk.totalDist - guidedWalk.traveled);
-        const wantTop = guidedWalk.topView || rem < 14;
-        const tgtPitch = wantTop ? 1.46 : 0.84;
-        const tgtDist = wantTop ? 36 : 42;
-        camState.pitch += (tgtPitch - camState.pitch) * 0.08;
-        camState.dist += (tgtDist - camState.dist) * 0.08;
-        camState.target.set(walkState.x, walkState.y + 1.2, walkState.z);
-        applyCamera();
+        const nowInsideBuilding = walkState.y > 0.15 || isInsideCorridorRoof(walkState.x, walkState.z);
+        if (nowInsideBuilding) guidedWalk.enteredBuilding = true;
+        if (guidedWalk.enteredBuilding && !guidedWalk.topView) {
+          // 進入建築物後：攝影機自動切換為水平視角跟隨小人後方拍攝，直到抵達並面對目的地教室門牌
+          // 走 A 棟中廊玄關樓梯或 D 棟樓梯時改為由下而上仰視中景跟拍 (3.25m, 仰角約 -11.5°)，緊貼小人背後，轉向時零盲區，可清楚看見小人與迴轉平台；
+          // 若由 2F 往下走樓梯，自動切換為高處鳥瞰視角 (俯角 ~67.6°、距離 5.2m)，直到下到 1F 地面
+          const inStairGuide = isInWingAPortalStairs(walkState.x, walkState.z) || isInWingDEastCorridorOrStair(walkState.x, walkState.z) || inStairNow;
+          const onLandingGuide = inStairGuide && walkState.y >= 1.50 && walkState.y <= 2.15;
+          let targetDistGuide = inStairGuide ? 3.85 : 2.65;
+          let targetPitchGuide = inStairGuide ? (onLandingGuide ? 0.22 : -0.10) : 0.12;
+          let targetYGuide = inStairGuide ? 1.15 : 1.38;
+          if (isDescendingStairs) {
+            if (walkState.y >= 1.30) {
+              // 下樓梯至迴轉平台：高處鳥瞰俯拍，完整看清小人、平台與往 1F 階梯路徑，絕不放大貼背
+              targetPitchGuide = 0.94;
+              targetDistGuide = 5.4;
+              targetYGuide = 0.72;
+            } else {
+              // 已進入往 1F 的下半段階梯：平滑轉為微俯跟拍
+              targetPitchGuide = 0.40;
+              targetDistGuide = 4.0;
+              targetYGuide = 1.05;
+            }
+          }
+          const yawDiff = normalizeAngleDiff(walkState.yaw - camState.yaw);
+          const guideYawSpeed = onLandingGuide ? 2.2 : (inStairGuide ? 4.8 : 7.5);
+          camState.yaw += yawDiff * Math.min(1, guideYawSpeed * dt);
+          camState.pitch += (targetPitchGuide - camState.pitch) * (1 - Math.exp(-7 * dt));
+          camState.dist += (targetDistGuide - camState.dist) * (1 - Math.exp(-7 * dt));
+          desiredWalkTarget.set(walkState.x, walkState.y + targetYGuide, walkState.z);
+          camState.target.lerp(desiredWalkTarget, 1 - Math.exp(-14 * dt));
+          applyCamera();
+          clampCameraObstruction(camState.target, camera.position, inStairGuide ? 2.4 : 1.05);
+
+          if (!isDescendingStairs) {
+            const camGroundY = getWalkElevation(camera.position.x, camera.position.z, walkState.y);
+            const minClearance = inStairGuide ? 0.30 : 1.15;
+            const neededLift = Math.max(0, (camGroundY + minClearance) - camera.position.y);
+            const maxCeilingLift = Math.max(0, (walkState.y + 3.22) - camera.position.y);
+            const targetLift = Math.min(neededLift, maxCeilingLift);
+            smoothCamLiftY += (targetLift - smoothCamLiftY) * (1 - Math.exp(-10 * dt));
+            if (smoothCamLiftY > 0.005) {
+              camera.position.y += smoothCamLiftY;
+              camera.lookAt(camState.target);
+            }
+          } else {
+            smoothCamLiftY = 0;
+            if (camera.position.y > 6.65) {
+              camera.position.y = 6.65;
+              camera.lookAt(camState.target);
+            }
+          }
+          updateCameraLineOfSightCulling(camera.position, walkState.x, walkState.y, walkState.z);
+        } else {
+          restoreCulledLensMeshes();
+          const rem = Math.max(0, guidedWalk.totalDist - guidedWalk.traveled);
+          const wantTop = guidedWalk.topView || (!guidedWalk.isRoom && rem < 14);
+          const tgtPitch = wantTop ? 1.46 : 0.84;
+          const tgtDist = wantTop ? 36 : 42;
+          camState.pitch += (tgtPitch - camState.pitch) * 0.08;
+          camState.dist += (tgtDist - camState.dist) * 0.08;
+          camState.target.set(walkState.x, walkState.y + 1.2, walkState.z);
+          applyCamera();
+        }
       } else if (walkFirstPerson) {
+        restoreCulledLensMeshes();
         camera.position.set(walkState.x, walkState.y + 1.62, walkState.z);
         camera.lookAt(
           walkState.x - Math.sin(walkState.yaw) * 10,
@@ -2019,41 +3066,84 @@
         );
       } else {
         const indoor = walkState.y > 0.2 || isInsideCorridorRoof(walkState.x, walkState.z);
-        const followDist = indoor ? Math.min(walkFollowDist, 2.8) : walkFollowDist;
-        const camH = indoor ? (walkState.y + 2.15 + walkState.pitch * 1.4) : (walkState.y + 2.6 + followDist * 0.25 + walkState.pitch * 3.0);
-        const camOrigin = new THREE.Vector3(walkState.x, walkState.y + 1.45, walkState.z);
-        const camDesired = new THREE.Vector3(
-          walkState.x + Math.sin(walkState.yaw) * followDist,
-          camH,
-          walkState.z + Math.cos(walkState.yaw) * followDist
-        );
-        const camDir = camDesired.clone().sub(camOrigin);
-        const maxCamDist = camDir.length();
-        if (maxCamDist > 0.2) {
-          camDir.normalize();
-          raycaster.set(camOrigin, camDir);
-          raycaster.far = maxCamDist;
-          const camHits = raycaster.intersectObjects(built.clickableMeshes, false);
-          raycaster.far = Infinity;
-          for (let hi = 0; hi < camHits.length; hi++) {
-            const h = camHits[hi];
-            if (h.distance > 0.25 && h.distance < maxCamDist - 0.25 && h.point.y > walkState.y + 0.35) {
-              const safeDist = Math.max(0.75, h.distance - 0.32);
-              camDesired.copy(camOrigin).addScaledVector(camDir, safeDist);
-              camDesired.y = Math.max(camDesired.y, walkState.y + 1.45);
-              break;
-            }
+        const inDEast = isInWingDEastCorridorOrStair(walkState.x, walkState.z);
+        const inAStairs = isInWingAPortalStairs(walkState.x, walkState.z);
+        const inStairFollow = inAStairs || inDEast || inStairNow;
+        const onLandingFree = inStairFollow && walkState.y >= 1.50 && walkState.y <= 2.15;
+
+        // 樓梯最佳跟拍邏輯：
+        // 1. 迴轉平台轉向時放緩鏡頭旋轉 (followRate = 2.2)，不急貼小人背後放大，維持穩定比例看清路徑與平台；
+        // 2. 下樓至迴轉平台 (y >= 1.30m) 採用高處鳥瞰俯拍 (pitch 0.94, dist 5.4m)，進入往 1F 下半段 (y < 1.30m) 再平順轉回後方微俯跟拍；
+        // 3. 遮擋屋頂與薄牆由 updateCameraLineOfSightCulling 自動透視隱藏，確保小人永遠清晰可見。
+        if (inStairFollow && !isUserOrbiting) {
+          const followDiff = normalizeAngleDiff(walkState.yaw - camState.yaw);
+          const followRate = onLandingFree ? 2.2 : (isDescendingStairs && walkState.y >= 1.30 ? 2.6 : 4.8);
+          camState.yaw += followDiff * Math.min(1, followRate * dt);
+          let targetPitch;
+          if (isDescendingStairs) {
+            targetPitch = walkState.y >= 1.30 ? 0.94 : 0.40;
+          } else {
+            targetPitch = onLandingFree ? 0.22 : -0.10;
+          }
+          camState.pitch += (targetPitch - camState.pitch) * (1 - Math.exp(-7 * dt));
+        }
+
+        // 1. 永遠以小人中心高度為穩定視角中心，維持穩定比例與視野
+        moveDeltaVec.set(walkState.x - prevWalkX, 0, walkState.z - prevWalkZ);
+        camState.target.add(moveDeltaVec);
+        const targetCenterY = (isDescendingStairs && walkState.y >= 1.30) ? 0.72 : (inStairFollow ? 1.15 : 1.38);
+        desiredWalkTarget.set(walkState.x, walkState.y + targetCenterY, walkState.z);
+        camState.target.lerp(desiredWalkTarget, 1 - Math.exp(-14 * dt));
+
+        // 2. 若原本處於遠景總覽距離，開始移動時觸發一次性平滑飛近 Tween
+        if ((isMovingNow || moveDeltaVec.lengthSq() > 1e-5) && walkFollowDist > 34 && !walkZoomTween) {
+          walkZoomTween = { t0: now, dur: 650, startDist: walkFollowDist, endDist: 3.5 };
+        }
+
+        // 3. 攝影機跟隨距離（維持穩定中遠景，不放大貼背）
+        let targetDist;
+        if (isDescendingStairs) {
+          targetDist = walkState.y >= 1.30 ? 5.4 : 4.0;
+        } else if (inStairFollow) {
+          targetDist = onLandingFree ? 4.0 : 3.85;
+        } else if (indoor) {
+          targetDist = Math.min(Math.max(2.55, walkFollowDist), 2.95);
+        } else {
+          targetDist = Math.max(2.6, walkFollowDist);
+        }
+
+        const distLerpRate = targetDist < camState.dist ? (1 - Math.exp(-12 * dt)) : (1 - Math.exp(-8 * dt));
+        camState.dist += (targetDist - camState.dist) * distLerpRate;
+
+        applyCamera();
+        clampCameraObstruction(camState.target, camera.position, inStairFollow ? 2.4 : 1.05);
+
+        // 4. 上下樓梯防穿階平滑抬升：梯道仰角跟拍時維持貼近地面 (~0.30m)，防相機沉入台階，同時絕不把鏡頭推高到 2F 樓板或天花板
+        if (!isDescendingStairs) {
+          const camGroundY = getWalkElevation(camera.position.x, camera.position.z, walkState.y);
+          const minClearance = inStairFollow ? 0.30 : 1.15;
+          const neededLift = Math.max(0, (camGroundY + minClearance) - camera.position.y);
+          const maxCeilingLift = Math.max(0, (walkState.y + 3.22) - camera.position.y);
+          const targetLift = Math.min(neededLift, maxCeilingLift);
+          smoothCamLiftY += (targetLift - smoothCamLiftY) * (1 - Math.exp(-10 * dt));
+          if (smoothCamLiftY > 0.005) {
+            camera.position.y += smoothCamLiftY;
+            camera.lookAt(camState.target);
+          }
+        } else {
+          smoothCamLiftY = 0;
+          if (camera.position.y > 6.65) {
+            camera.position.y = 6.65;
+            camera.lookAt(camState.target);
           }
         }
-        camera.position.copy(camDesired);
-        camera.lookAt(
-          walkState.x - Math.sin(walkState.yaw) * 2.5,
-          walkState.y + 1.35 - Math.sin(walkState.pitch) * 2.5,
-          walkState.z - Math.cos(walkState.yaw) * 2.5
-        );
+
+        // 5. 確保攝影機在室內跟著小人移動時，不會被鏡頭正後方的單一薄牆或欄杆擋住小人（且全場景 100% 實體無半透明殘影）
+        updateCameraLineOfSightCulling(camera.position, walkState.x, walkState.y, walkState.z);
       }
-      if (compassDial) compassDial.style.transform = `rotate(${(walkState.yaw * 180) / Math.PI}deg)`;
+      if (compassDial) compassDial.style.transform = `rotate(${((walkFirstPerson ? walkState.yaw : camState.yaw) * 180) / Math.PI}deg)`;
     } else {
+      updateBuildingOcclusionOpacity(new Set(), dt);
       // 飛航插值
       if (flyAnim) {
         const p = Math.min(1, (now - flyAnim.t0) / flyAnim.dur);

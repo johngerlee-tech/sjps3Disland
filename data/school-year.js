@@ -32,14 +32,18 @@ window.SCHOOL_YEAR_DATA = {
           { code: "104", name: "傳達室", nameEn: "Reception / Security", type: "office" },
           { code: "105", name: "健康中心（保健室）", nameEn: "Health Center", type: "office", aliases: ["保健室", "健康中心"] },
           { code: "106", name: "校長室", nameEn: "Principal's Office", type: "office" },
-          { code: "107", name: "綜合教室(一)／夜光天使", nameEn: "Multi-purpose Room 1", type: "special" }
+          { code: "107", name: "夜光天使/綜(二)", nameEn: "Night Angel / Multi-purpose", type: "special", aliases: ["夜光天使", "夜光天使/綜(一)", "夜光天使/綜(二)", "綜合教室(一)"] },
+          { code: "廁所", name: "東側廁所", nameEn: "East Restroom", type: "common" }
         ],
         2: [
+          { code: "Wc 2", name: "性別友善廁所", nameEn: "Gender-Friendly Restroom", type: "common" },
           { code: "201", name: "教具室", nameEn: "Teaching Aids Room", type: "special" },
-          { code: "202-204", name: "教師辦公室", nameEn: "Faculty Office", type: "office" },
-          { code: "205", name: "資訊教室(二)", nameEn: "Computer Lab 2", type: "special" },
-          { code: "206", name: "音樂教室", nameEn: "Music Room", type: "special" },
-          { code: "207", name: "資訊教室(一)", nameEn: "Computer Lab 1", type: "special" }
+          { code: "202-204", name: "辦公室", nameEn: "Faculty Office (A202-204)", type: "office" },
+          { code: "205", name: "資訊教室(二)", nameEn: "Computer Lab 2 (A205)", type: "special" },
+          { code: "206", name: "音樂教室", nameEn: "Music Room (A206)", type: "special" },
+          { code: "207", name: "資訊教室(一)", nameEn: "Computer Lab 1 (A207)", type: "special" },
+          { code: "", name: "東側廁所", nameEn: "East Restroom (2F)", type: "common" },
+          { code: "201-203", name: "視聽教室", nameEn: "Audiovisual Hall", type: "special" }
         ],
         B1: [
           { code: "B1", name: "防空避難室（不開放內部導覽）", nameEn: "Air-raid Shelter (Exterior only)", type: "common" }
@@ -59,6 +63,7 @@ window.SCHOOL_YEAR_DATA = {
       // 由西南端（靠操場側）→ 東北端（靠C棟側）排列
       floorsData: {
         1: [
+          { code: "Wc 3", name: "西側廁所", nameEn: "West Restroom (Wc 3)", type: "common" },
           { code: "101", name: "五乙教室", nameEn: "Class 5B", type: "class5" },
           { code: "102", name: "五甲教室", nameEn: "Class 5A", type: "class5" },
           { code: "103", name: "四乙教室", nameEn: "Class 4B", type: "class4" },
@@ -66,9 +71,11 @@ window.SCHOOL_YEAR_DATA = {
           { code: "105", name: "三乙教室", nameEn: "Class 3B", type: "class3" },
           { code: "106", name: "三甲教室", nameEn: "Class 3A", type: "class3" },
           { code: "107", name: "二乙教室", nameEn: "Class 2B", type: "class2" },
-          { code: "108", name: "諮商室／校史室", nameEn: "Counseling & History Room", type: "office", aliases: ["校史室", "諮商室"] }
+          { code: "108", name: "諮商室／校史室", nameEn: "Counseling & History Room", type: "office", aliases: ["校史室", "諮商室"] },
+          { code: "回收室", name: "資源回收室", nameEn: "Recycling Room", type: "common" }
         ],
         2: [
+          { code: "Wc 4", name: "西側廁所", nameEn: "West Restroom (Wc 4)", type: "common" },
           { code: "201", name: "美勞教室", nameEn: "Art Classroom", type: "special" },
           { code: "202", name: "社會教室", nameEn: "Social Studies Room", type: "special" },
           { code: "203", name: "英語教室", nameEn: "English Classroom", type: "special" },
@@ -120,12 +127,12 @@ window.SCHOOL_YEAR_DATA = {
     },
 
     corridor_mid: {
-      name: "創客藝廊",
-      nameEn: "Maker Gallery (Central Walkway 2F)",
-      summary: "連接 A 棟與 B 棟的二層風雨連廊，2 樓打造為「創客藝廊」，是一個展示學生多元創作成果與閱讀素養的人文藝術實驗場；屋頂裝設太陽能光電板。",
-      summaryEn: "Two-story covered bridge connecting Buildings A and B. The 2F houses 'Maker Gallery', an artistic and reading literacy showcase for student creations.",
-      features: ["2F 創客藝廊", "學生多元創作展區", "屋頂太陽能光電板"],
-      featuresEn: ["Maker Gallery (2F)", "Student Creations Showcase", "Solar Panel Roof"],
+      name: "C-Show創客走廊",
+      nameEn: "C-Show Maker Corridor (Central Walkway 2F)",
+      summary: "連接 A 棟與 B 棟的二層風雨連廊，2 樓打造為「C-Show創客走廊（創客藝廊）」，兩側牆體與玻璃窗面展示學生多元創作成果與閱讀素養作品；屋頂裝設太陽能光電板。",
+      summaryEn: "Two-story covered bridge connecting Buildings A and B. The 2F houses 'C-Show Maker Corridor', an artistic and reading literacy showcase for student creations.",
+      features: ["2F C-Show創客走廊", "兩側窗面學生多元創作展區", "屋頂太陽能光電板"],
+      featuresEn: ["C-Show Maker Corridor (2F)", "Student Creations on Windows", "Solar Panel Roof"],
       photos: ["assets/photos/cshow_1.jpg", "assets/photos/cshow_2.jpg", "assets/photos/cshow_3.jpg", "assets/photos/cshow_4.jpg"],
       youtubeUrl: "https://youtu.be/NkKXx5uAjh0"
     },
