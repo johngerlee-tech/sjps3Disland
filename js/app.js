@@ -697,7 +697,7 @@
   });
 
   function getSearchDronePose(b, hit) {
-    const navMap = new Map((D.navNodes || []).map(n => [n.id, n]));
+    const navNodesObj = D.navNodes || {};
     const floorBaseY = hit && hit.fk === "2" ? (b.floorHeight || 3.6) : 0;
 
     // 1. 若搜尋特定教室／空間，優先精準對齊該教室門牌與正前方走廊中景
@@ -707,16 +707,17 @@
         r.parentId === b.id &&
         ((hit.code && r.name.includes(hit.code)) || (cleanName && r.name.includes(cleanName)))
       );
-      if (matchedRoom && navMap.has(matchedRoom.node)) {
-        const nd = navMap.get(matchedRoom.node);
+      const nd = matchedRoom ? navNodesObj[matchedRoom.node] : null;
+      if (matchedRoom && Array.isArray(nd) && nd.length >= 2) {
+        const ndX = nd[0], ndZ = nd[1];
         const yBase = matchedRoom.is2F ? (b.floorHeight || 3.6) : 0;
-        const yaw = typeof matchedRoom.facingYaw === "number" ? matchedRoom.facingYaw : b.rotY;
+        const yaw = typeof matchedRoom.facingYaw === "number" ? matchedRoom.facingYaw : (b.rotY || 0);
         const standDist = 3.1;
         // facingYaw 為面對門牌方向，攝影機退至門前 standDist 公尺、離樓地板約 2.0m 高懸停
-        const camX = nd.x + Math.sin(yaw) * standDist * 0.45;
-        const camZ = nd.z + Math.cos(yaw) * standDist * 0.45;
-        const tgtX = nd.x - Math.sin(yaw) * 1.8;
-        const tgtZ = nd.z - Math.cos(yaw) * 1.8;
+        const camX = ndX + Math.sin(yaw) * standDist * 0.45;
+        const camZ = ndZ + Math.cos(yaw) * standDist * 0.45;
+        const tgtX = ndX - Math.sin(yaw) * 1.8;
+        const tgtZ = ndZ - Math.cos(yaw) * 1.8;
         return {
           target: new THREE.Vector3(tgtX, yBase + 1.85, tgtZ),
           endCam: new THREE.Vector3(camX, yBase + 2.0, camZ),
@@ -727,11 +728,12 @@
     }
 
     // 2. 建築／場域搜尋：依建築朝向判斷正前方，並依尺寸自動決定中景或遠景距離
-    let fx = Math.sin(b.rotY), fz = Math.cos(b.rotY);
+    const rotY = b.rotY || 0;
+    let fx = Math.sin(rotY), fz = Math.cos(rotY);
     if (b.id === "bldg_d") {
-      fx = Math.cos(b.rotY); fz = -Math.sin(b.rotY);
+      fx = Math.cos(rotY); fz = -Math.sin(rotY);
     } else if (b.id === "bldg_c") {
-      fx = -Math.cos(b.rotY); fz = Math.sin(b.rotY);
+      fx = -Math.cos(rotY); fz = Math.sin(rotY);
     }
     const maxDim = Math.max(b.w || 8, b.d || 8);
     const hoverDist = maxDim <= 10
@@ -792,10 +794,12 @@
     };
   }
 
+  let currentSearchHits = [];
   searchInput.addEventListener("input", () => {
     const q = searchInput.value.trim().toLowerCase();
-    if (!q) { searchResults.hidden = true; return; }
+    if (!q) { currentSearchHits = []; searchResults.hidden = true; return; }
     const hits = searchIndex.filter(item => item.keywords.includes(q)).slice(0, 10);
+    currentSearchHits = hits;
     if (hits.length === 0) {
       searchResults.innerHTML = `<li style="cursor:default;color:#64748b;">${lang === "en" ? "No match found" : "找不到相符結果"}</li>`;
     } else {
@@ -816,6 +820,16 @@
       });
     }
     searchResults.hidden = false;
+  });
+
+  searchInput.addEventListener("keydown", e => {
+    if (e.key === "Enter" && currentSearchHits.length > 0) {
+      e.preventDefault();
+      stopTour();
+      startSearchDroneApproach(currentSearchHits[0]);
+      searchResults.hidden = true;
+      searchInput.blur();
+    }
   });
 
   document.addEventListener("click", e => {
