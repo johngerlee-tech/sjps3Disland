@@ -734,6 +734,13 @@ html, body {
   #campusFooter { display: none; }
 }
 
+/* 行走／自動帶路時自動收合底部提示列，並讓控制條貼近底部釋出更多 3D 視野 */
+body.walking-active #campusFooter { display: none; }
+body.walking-active #walkHudBar,
+body.walking-active #guideControlBar {
+  bottom: max(14px, env(safe-area-inset-bottom));
+}
+
 /* 手機直式轉橫式提示遮罩 */
 #portraitTipOverlay {
   position: fixed;

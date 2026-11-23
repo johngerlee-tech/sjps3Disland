@@ -1908,8 +1908,16 @@
     return false;
   }
 
+  let zonesWasOpenBeforeWalk = false;
+
   function enterWalkMode(spawn) {
     stopTour();
+    if (!walkMode && zonesBoxEl) {
+      zonesWasOpenBeforeWalk = !zonesBoxEl.classList.contains("collapsed");
+    }
+    if (typeof setZonesPanelOpen === "function") setZonesPanelOpen(false);
+    if (detailDrawer) detailDrawer.hidden = true;
+    document.body.classList.add("walking-active");
     walkMode = true;
     flyAnim = null;
     if (spawn) {
@@ -1946,6 +1954,10 @@
   function exitWalkMode() {
     walkMode = false;
     guidedWalk = null;
+    document.body.classList.remove("walking-active");
+    if (zonesWasOpenBeforeWalk && window.innerWidth > 900 && window.innerHeight > 540 && typeof setZonesPanelOpen === "function") {
+      setZonesPanelOpen(true);
+    }
     autoOrbitActive = false;
     autoOrbitBuilding = null;
     camAzVel = 0;
