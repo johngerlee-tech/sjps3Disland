@@ -541,12 +541,16 @@
         }
       }
       v.copy(item.pos).project(camera);
-      if (v.z > 1 || (isGuiding && (Math.abs(v.x) > 0.92 || Math.abs(v.y) > 0.92))) {
+      if (v.z > 1 || ((isGuiding || tourActive) && (Math.abs(v.x) > 0.92 || Math.abs(v.y) > 0.92))) {
         item.el.style.display = "none";
       } else {
-        if (isGuiding && item.b && !(guidedWalk.endBid && item.b.id === guidedWalk.endBid)) {
-          // 自動帶路時：檢測小人眼睛/鏡頭視線是否被建築主體遮擋，看不到就隱藏標籤
-          const eyePos = new THREE.Vector3(walkState.x, walkState.y + 1.5, walkState.z);
+        const checkGuideOcclude = isGuiding && item.b && !(guidedWalk.endBid && item.b.id === guidedWalk.endBid);
+        const checkTourOcclude = tourActive && item.b && !(selectedBuildingId && item.b.id === selectedBuildingId);
+        if (checkGuideOcclude || checkTourOcclude) {
+          // 自動帶路或特色導覽時：檢測視線是否被建築主體遮擋，看不到就隱藏浮動字卡
+          const eyePos = isGuiding
+            ? new THREE.Vector3(walkState.x, walkState.y + 1.5, walkState.z)
+            : camera.position;
           const dir = new THREE.Vector3().subVectors(item.pos, eyePos);
           const dist = dir.length();
           let occluded = false;
@@ -740,7 +744,8 @@
     const b = D.buildings.find(item => item.id === hit.bid);
     if (!b) return;
     if (walkMode) exitWalkMode();
-    selectBuilding(hit.bid, hit.fk, hit.code, true);
+    selectedBuildingId = hit.bid;
+    if (detailDrawer) detailDrawer.hidden = true;
 
     const pose = getSearchDronePose(b, hit);
     const endDx = pose.endCam.x - pose.target.x;
