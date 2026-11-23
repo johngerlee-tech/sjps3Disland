@@ -60,10 +60,12 @@
     dist: Math.hypot(initH, initDy)
   };
   let flyAnim = null;
+  let droneSearchAnim = null;
 
   function applyCamera() {
-    const minPitch = (typeof walkMode !== "undefined" && walkMode) ? -0.25 : 0.08;
-    const minDist = (typeof walkMode !== "undefined" && walkMode) ? 0.42 : 6;
+    const isWalk = (typeof walkMode !== "undefined" && walkMode);
+    const minPitch = isWalk ? -0.25 : (droneSearchAnim ? -0.1 : 0.08);
+    const minDist = isWalk ? 0.42 : (droneSearchAnim ? 2.2 : 6);
     camState.pitch = Math.max(minPitch, Math.min(1.48, camState.pitch));
     camState.dist = Math.max(minDist, Math.min(380, camState.dist));
     const hDist = camState.dist * Math.cos(camState.pitch);
@@ -82,6 +84,7 @@
   }
 
   function flyTo(targetArr, camPosArr, durationMs = 750) {
+    droneSearchAnim = null;
     const startTarget = camState.target.clone();
     const startYaw = camState.yaw;
     const startPitch = camState.pitch;
@@ -143,6 +146,7 @@
 
   canvas.addEventListener("mousedown", e => {
     flyAnim = null;
+    droneSearchAnim = null;
     lastX = downX = e.clientX;
     lastY = downY = e.clientY;
     // 漫步模式下所有視角皆以小人為中心，按住左鍵或右鍵拖曳皆可 360 度環顧四週（未按滑鼠鍵移動游標時不旋轉）
@@ -191,6 +195,7 @@
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
     flyAnim = null;
+    droneSearchAnim = null;
     if (walkMode && (!guidedWalk || guidedWalk.paused)) {
       walkFollowDist = Math.max(2.2, Math.min(48, walkFollowDist * (e.deltaY > 0 ? 1.12 : 0.89)));
       return;
@@ -203,6 +208,7 @@
   let touchPrev = null;
   canvas.addEventListener("touchstart", e => {
     flyAnim = null;
+    droneSearchAnim = null;
     if (e.touches.length === 1) {
       if (walkMode) isUserOrbiting = true;
       touchPrev = { mode: "one", x: e.touches[0].clientX, y: e.touches[0].clientY, sx: e.touches[0].clientX, sy: e.touches[0].clientY };
@@ -679,6 +685,99 @@
     }
   });
 
+  function getSearchDronePose(b, hit) {
+    const navMap = new Map((D.navNodes || []).map(n => [n.id, n]));
+    const floorBaseY = hit && hit.fk === "2" ? (b.floorHeight || 3.6) : 0;
+
+    // 1. 若搜尋特定教室／空間，優先精準對齊該教室門牌與正前方走廊中景
+    if (hit && (hit.code || hit.fk)) {
+      const cleanName = String(hit.label || "").replace(hit.code || "", "").trim();
+      const matchedRoom = (D.roomNavTargets || []).find(r =>
+        r.parentId === b.id &&
+        ((hit.code && r.name.includes(hit.code)) || (cleanName && r.name.includes(cleanName)))
+      );
+      if (matchedRoom && navMap.has(matchedRoom.node)) {
+        const nd = navMap.get(matchedRoom.node);
+        const yBase = matchedRoom.is2F ? (b.floorHeight || 3.6) : 0;
+        const yaw = typeof matchedRoom.facingYaw === "number" ? matchedRoom.facingYaw : b.rotY;
+        const standDist = 3.1;
+        // facingYaw 為面對門牌方向，攝影機退至門前 standDist 公尺、離樓地板約 2.0m 高懸停
+        const camX = nd.x + Math.sin(yaw) * standDist * 0.45;
+        const camZ = nd.z + Math.cos(yaw) * standDist * 0.45;
+        const tgtX = nd.x - Math.sin(yaw) * 1.8;
+        const tgtZ = nd.z - Math.cos(yaw) * 1.8;
+        return {
+          target: new THREE.Vector3(tgtX, yBase + 1.85, tgtZ),
+          endCam: new THREE.Vector3(camX, yBase + 2.0, camZ),
+          highHeight: yBase + 22,
+          highDist: 16
+        };
+      }
+    }
+
+    // 2. 建築／場域搜尋：依建築朝向判斷正前方，並依尺寸自動決定中景或遠景距離
+    let fx = Math.sin(b.rotY), fz = Math.cos(b.rotY);
+    if (b.id === "bldg_d") {
+      fx = Math.cos(b.rotY); fz = -Math.sin(b.rotY);
+    } else if (b.id === "bldg_c") {
+      fx = -Math.cos(b.rotY); fz = Math.sin(b.rotY);
+    }
+    const maxDim = Math.max(b.w || 8, b.d || 8);
+    const hoverDist = maxDim <= 10
+      ? Math.max(8.5, maxDim * 1.35)
+      : Math.min(34, Math.max(15, maxDim * 0.78));
+    const targetY = floorBaseY + Math.min(2.6, Math.max(1.6, (b.floorHeight || b.h || 3.4) * 0.5));
+    return {
+      target: new THREE.Vector3(b.x, targetY, b.z),
+      endCam: new THREE.Vector3(b.x + fx * hoverDist, floorBaseY + 2.0, b.z + fz * hoverDist),
+      highHeight: floorBaseY + Math.max(24, hoverDist * 1.05),
+      highDist: Math.max(20, hoverDist * 1.25)
+    };
+  }
+
+  function startSearchDroneApproach(hit) {
+    if (!hit) return;
+    const b = D.buildings.find(item => item.id === hit.bid);
+    if (!b) return;
+    if (walkMode) exitWalkMode();
+    selectBuilding(hit.bid, hit.fk, hit.code, true);
+
+    const pose = getSearchDronePose(b, hit);
+    const endDx = pose.endCam.x - pose.target.x;
+    const endDy = pose.endCam.y - pose.target.y;
+    const endDz = pose.endCam.z - pose.target.z;
+    const endDist = Math.max(2.5, Math.hypot(endDx, endDy, endDz));
+    const endPitch = Math.asin(Math.max(-0.99, Math.min(0.99, endDy / endDist)));
+    const endYaw = Math.atan2(endDx, endDz);
+
+    // 階段 1 高空俯拍終點：位於目標正前方偏高空（約 22~34m 高俯拍建築）
+    const highDy = pose.highHeight - pose.target.y;
+    const highDist = Math.max(pose.highDist, Math.hypot(highDy, endDist * 0.85));
+    const highPitch = Math.asin(Math.max(0.45, Math.min(1.18, highDy / highDist)));
+
+    let diffYaw1 = endYaw - camState.yaw;
+    while (diffYaw1 > Math.PI) diffYaw1 -= Math.PI * 2;
+    while (diffYaw1 < -Math.PI) diffYaw1 += Math.PI * 2;
+
+    flyAnim = null;
+    droneSearchAnim = {
+      t0: performance.now(),
+      stage1Dur: 1100,
+      stage2Dur: 1350,
+      startTarget: camState.target.clone(),
+      startYaw: camState.yaw,
+      startPitch: camState.pitch,
+      startDist: camState.dist,
+      diffYaw1,
+      highPitch,
+      highDist,
+      endTarget: pose.target,
+      endYaw,
+      endPitch,
+      endDist
+    };
+  }
+
   searchInput.addEventListener("input", () => {
     const q = searchInput.value.trim().toLowerCase();
     if (!q) { searchResults.hidden = true; return; }
@@ -696,7 +795,7 @@
         li.onclick = () => {
           const h = hits[Number(li.dataset.idx)];
           stopTour();
-          selectBuilding(h.bid, h.fk, h.code);
+          startSearchDroneApproach(h);
           searchResults.hidden = true;
           searchInput.blur();
         };
@@ -1943,11 +2042,11 @@
     camState.pitch = 0.20;
     camState.dist = walkFollowDist;
     applyCamera();
-    document.getElementById("walkHudBar").hidden = false;
+    document.getElementById("walkHudBar").hidden = isMobileLayout();
+    if (walkHudToggleBtnEl) walkHudToggleBtnEl.hidden = !isMobileLayout();
     document.getElementById("walkModeBtn").classList.add("active");
     document.getElementById("walkJoystick").classList.add("visible");
-    const miniWrap = document.getElementById("minimapWrap");
-    if (miniWrap && !guidedWalk && minimapEnabled) miniWrap.classList.add("visible");
+    if (typeof syncMinimapVisibility === "function") syncMinimapVisibility();
     walkerGroup.visible = !walkFirstPerson;
   }
 
@@ -1970,6 +2069,7 @@
     walkerGroup.visible = false;
     clickWalkTarget = null;
     document.getElementById("walkHudBar").hidden = true;
+    if (walkHudToggleBtnEl) walkHudToggleBtnEl.hidden = true;
     document.getElementById("guideControlBar").hidden = true;
     document.getElementById("walkModeBtn").classList.remove("active");
     document.getElementById("walkJoystick").classList.remove("visible");
@@ -1989,6 +2089,7 @@
     clickWalkTarget = null;
     enterWalkMode({ x: pts[0].x, z: pts[0].z, y: pts[0].y, yaw: Math.atan2(pts[0].x - pts[1].x, pts[0].z - pts[1].z) });
     document.getElementById("walkHudBar").hidden = true; // 模擬帶路時顯示專用帶路面板
+    if (walkHudToggleBtnEl) walkHudToggleBtnEl.hidden = true;
     if (navRouteGroup) {
       navRouteGroup.traverse(obj => {
         if (obj.userData && obj.userData.isStartPin) obj.visible = false;
@@ -2033,8 +2134,24 @@
   };
   document.getElementById("guideCloseBtn").onclick = stopGuidedWalk;
 
+  function isMobileLayout() {
+    return Math.min(window.innerWidth, window.innerHeight) < 768;
+  }
+  const walkHudToggleBtnEl = document.getElementById("walkHudToggleBtn");
+  if (walkHudToggleBtnEl) {
+    walkHudToggleBtnEl.onclick = () => {
+      const bar = document.getElementById("walkHudBar");
+      if (bar) bar.hidden = !bar.hidden;
+    };
+  }
+
   document.getElementById("walkModeBtn").onclick = () => {
-    if (walkMode) exitWalkMode(); else enterWalkMode((D.walkSpawns || [])[0]);
+    if (guidedWalk) {
+      guidedWalk = null;
+      clearNavRoute();
+      document.getElementById("guideControlBar").hidden = true;
+    }
+    enterWalkMode((D.walkSpawns || [])[0]);
   };
   document.getElementById("exitWalkBtn").onclick = exitWalkMode;
   document.getElementById("charBoyBtn").onclick = () => {
@@ -2047,7 +2164,7 @@
     document.getElementById("charGirlBtn").classList.add("active");
     document.getElementById("charBoyBtn").classList.remove("active");
   };
-  let minimapEnabled = true;
+  let minimapEnabled = !isMobileLayout();
   function syncMinimapVisibility() {
     const miniWrap = document.getElementById("minimapWrap");
     const miniBtn = document.getElementById("walkMinimapBtn");
@@ -2056,6 +2173,7 @@
     }
     if (miniBtn) miniBtn.classList.toggle("active", minimapEnabled);
   }
+  syncMinimapVisibility();
   const miniCloseBtn = document.getElementById("minimapCloseBtn");
   if (miniCloseBtn) {
     miniCloseBtn.onclick = () => { minimapEnabled = false; syncMinimapVisibility(); };
@@ -2997,10 +3115,10 @@
             walkState.pitch = 0.06;
             walkerGroup.visible = true;
             document.getElementById("walkModeBtn").classList.add("active");
-            document.getElementById("walkHudBar").hidden = false;
+            document.getElementById("walkHudBar").hidden = isMobileLayout();
+            if (walkHudToggleBtnEl) walkHudToggleBtnEl.hidden = !isMobileLayout();
             document.getElementById("walkJoystick").classList.add("visible");
-            const miniWrap = document.getElementById("minimapWrap");
-            if (miniWrap && minimapEnabled) miniWrap.classList.add("visible");
+            if (typeof syncMinimapVisibility === "function") syncMinimapVisibility();
             const destB = destBid ? D.buildings.find(item => item.id === destBid) : null;
             if (typeof destFacingYaw === "number") {
               walkState.yaw = destFacingYaw;
@@ -3279,6 +3397,37 @@
       if (compassDial) compassDial.style.transform = `rotate(${((walkFirstPerson ? walkState.yaw : camState.yaw) * 180) / Math.PI}deg)`;
     } else {
       updateBuildingOcclusionOpacity(new Set(), dt);
+      // 無人機搜尋俯拍降落懸停動畫
+      if (droneSearchAnim) {
+        const elapsed = now - droneSearchAnim.t0;
+        const s1 = droneSearchAnim.stage1Dur;
+        const s2 = droneSearchAnim.stage2Dur;
+        if (elapsed < s1) {
+          const p = elapsed / s1;
+          const ease = 1 - Math.pow(1 - p, 3);
+          camState.target.lerpVectors(droneSearchAnim.startTarget, droneSearchAnim.endTarget, ease);
+          camState.yaw = droneSearchAnim.startYaw + droneSearchAnim.diffYaw1 * ease;
+          camState.pitch = droneSearchAnim.startPitch + (droneSearchAnim.highPitch - droneSearchAnim.startPitch) * ease;
+          camState.dist = droneSearchAnim.startDist + (droneSearchAnim.highDist - droneSearchAnim.startDist) * ease;
+        } else if (elapsed < s1 + s2) {
+          const p = (elapsed - s1) / s2;
+          const ease = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+          camState.target.copy(droneSearchAnim.endTarget);
+          camState.yaw = droneSearchAnim.endYaw;
+          camState.pitch = droneSearchAnim.highPitch + (droneSearchAnim.endPitch - droneSearchAnim.highPitch) * ease;
+          camState.dist = droneSearchAnim.highDist + (droneSearchAnim.endDist - droneSearchAnim.highDist) * ease;
+        } else {
+          // 離地約 2m 懸停微幅呼吸浮動
+          const hoverT = (elapsed - s1 - s2) * 0.001;
+          camState.target.copy(droneSearchAnim.endTarget);
+          camState.target.y += Math.sin(hoverT * 1.4) * 0.06;
+          camState.yaw = droneSearchAnim.endYaw + Math.sin(hoverT * 0.55) * 0.035;
+          camState.pitch = droneSearchAnim.endPitch;
+          camState.dist = droneSearchAnim.endDist;
+        }
+        applyCamera();
+      }
+
       // 飛航插值
       if (flyAnim) {
         const p = Math.min(1, (now - flyAnim.t0) / flyAnim.dur);
@@ -3299,7 +3448,7 @@
       if (keys["s"] || keys["arrowdown"]) { camState.target.x += sinY * spd; camState.target.z += cosY * spd; moved = true; }
       if (keys["a"] || keys["arrowleft"]) { camState.target.x -= cosY * spd; camState.target.z += sinY * spd; moved = true; }
       if (keys["d"] || keys["arrowright"]) { camState.target.x += cosY * spd; camState.target.z -= sinY * spd; moved = true; }
-      if (moved) applyCamera();
+      if (moved) { droneSearchAnim = null; applyCamera(); }
     }
 
     updateLabels();

@@ -734,6 +734,17 @@ html, body {
   #campusFooter { display: none; }
 }
 
+/* 手機模式預設隱藏漫步選單時的展開按鈕 */
+.walk-hud-toggle-btn {
+  position: absolute;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 32;
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(22, 128, 73, 0.38);
+}
+.walk-hud-toggle-btn[hidden] { display: none; }
+
 /* 行走／自動帶路時自動收合底部提示列，並讓控制條貼近底部釋出更多 3D 視野 */
 body.walking-active #campusFooter { display: none; }
 body.walking-active #walkHudBar,
