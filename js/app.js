@@ -574,8 +574,9 @@
   function renderZones() {
     const list = document.getElementById("zoneList");
     if (!list) return;
-    list.innerHTML = D.zones.map((z, idx) => `
-      <button type="button" class="zone-btn ${idx === 0 ? "active" : ""}" data-zid="${z.id}">
+    const quickZones = D.zones.filter(z => z.id !== "all");
+    list.innerHTML = quickZones.map(z => `
+      <button type="button" class="zone-btn" data-zid="${z.id}">
         ${z.icon} ${lang === "en" ? z.nameEn : z.name}
       </button>
     `).join("");
@@ -587,12 +588,29 @@
         const z = D.zones.find(item => item.id === btn.dataset.zid);
         if (walkMode) {
           exitWalkMode();
-          if (z && z.id !== "all") flyTo(z.target, z.camPos, 750);
+          if (z) flyTo(z.target, z.camPos, 750);
         } else if (z) {
           flyTo(z.target, z.camPos, 750);
         }
+        if (window.innerWidth <= 900 || window.innerHeight <= 540) {
+          setZonesPanelOpen(false);
+        }
       };
     });
+  }
+
+  const zonesBoxEl = document.getElementById("zonesBox");
+  const zonesOpenBtnEl = document.getElementById("zonesOpenBtn");
+  const zonesCollapseBtnEl = document.getElementById("zonesCollapseBtn");
+  function setZonesPanelOpen(open) {
+    if (!zonesBoxEl || !zonesOpenBtnEl) return;
+    zonesBoxEl.classList.toggle("collapsed", !open);
+    zonesOpenBtnEl.hidden = open;
+  }
+  if (zonesOpenBtnEl) zonesOpenBtnEl.onclick = () => setZonesPanelOpen(true);
+  if (zonesCollapseBtnEl) zonesCollapseBtnEl.onclick = () => setZonesPanelOpen(false);
+  if (window.innerWidth <= 900 || window.innerHeight <= 540) {
+    setZonesPanelOpen(false);
   }
 
   function refreshLanguageUI() {
@@ -600,7 +618,18 @@
     document.getElementById("brandSub").textContent = lang === "en"
       ? D.school.addressEn
       : D.school.address;
-    document.getElementById("zonesHeading").textContent = lang === "en" ? "Campus Zones" : "📍 校園分區視角";
+    document.getElementById("zonesHeading").textContent = lang === "en" ? "📍 Campus Zones" : "📍 校園分區視角";
+    if (zonesOpenBtnEl) zonesOpenBtnEl.textContent = lang === "en" ? "🧭 Zones & Guide" : "🧭 分區・自動帶路";
+    const pTitle = document.getElementById("portraitTipTitle");
+    const pDesc = document.getElementById("portraitTipDesc");
+    const pAuto = document.getElementById("portraitAutoRotateBtn");
+    const pDis = document.getElementById("portraitDismissBtn");
+    if (pTitle) pTitle.textContent = lang === "en" ? "Rotate to Landscape Mode" : "建議將手機轉為橫式瀏覽";
+    if (pDesc) pDesc.textContent = lang === "en"
+      ? "Landscape view gives you the full 3D campus, route planner, and guided walk controls."
+      : "橫向畫面可同時顯示完整 3D 校園、路線導航與自動帶路控制列，操作更順手！";
+    if (pAuto) pAuto.textContent = lang === "en" ? "🔄 Fullscreen Landscape" : "🔄 切換全螢幕橫式";
+    if (pDis) pDis.textContent = lang === "en" ? "Continue in Portrait" : "仍以直式瀏覽";
     document.getElementById("startTourBtn").textContent = lang === "en" ? "🚩 Highlight Tour" : "🚩 特色導覽";
     document.getElementById("resetOverviewBtn").textContent = lang === "en" ? "🏠 Overview" : "🏠 全校總覽";
     document.getElementById("campusSearchInput").placeholder = lang === "en"
@@ -2094,6 +2123,7 @@
   renderWalkSpawns();
 
   document.getElementById("resetOverviewBtn").onclick = () => {
+    document.querySelectorAll("#zoneList .zone-btn").forEach(b => b.classList.remove("active"));
     if (walkMode) { exitWalkMode(); return; }
     const z0 = D.zones[0];
     flyTo(z0.target, z0.camPos, 700);
@@ -2114,10 +2144,54 @@
     refreshLanguageUI();
   };
 
-  window.addEventListener("resize", () => {
+  let portraitTipDismissed = false;
+  const portraitOverlayEl = document.getElementById("portraitTipOverlay");
+  const portraitHintEl = document.getElementById("portraitTipHint");
+  const portraitAutoBtnEl = document.getElementById("portraitAutoRotateBtn");
+  const portraitDismissBtnEl = document.getElementById("portraitDismissBtn");
+
+  function updatePortraitTip() {
+    if (!portraitOverlayEl) return;
+    const isPhonePortrait = window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+    portraitOverlayEl.hidden = !(isPhonePortrait && !portraitTipDismissed);
+  }
+  if (portraitDismissBtnEl) {
+    portraitDismissBtnEl.onclick = () => {
+      portraitTipDismissed = true;
+      updatePortraitTip();
+    };
+  }
+  if (portraitAutoBtnEl) {
+    portraitAutoBtnEl.onclick = async () => {
+      try {
+        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+        }
+        if (screen.orientation && screen.orientation.lock) {
+          await screen.orientation.lock("landscape");
+          portraitOverlayEl.hidden = true;
+          return;
+        }
+      } catch (e) { /* 瀏覽器不支援自動鎖定橫式時顯示提示 */ }
+      if (portraitHintEl) {
+        portraitHintEl.textContent = lang === "en"
+          ? "Please turn your phone sideways to switch to landscape mode."
+          : "您的瀏覽器不支援自動旋轉，請直接將手機橫放即可切換為橫式畫面 📱↻";
+        portraitHintEl.hidden = false;
+      }
+    };
+  }
+  updatePortraitTip();
+
+  function handleViewportResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    updatePortraitTip();
+  }
+  window.addEventListener("resize", handleViewportResize);
+  window.addEventListener("orientationchange", () => {
+    setTimeout(handleViewportResize, 120);
   });
 
   // --- 7. 小地圖 (Minimap) ---

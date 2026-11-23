@@ -53,8 +53,12 @@
     </header>
 
     <!-- 左側分區視角與路線導航 -->
+    <button type="button" id="zonesOpenBtn" class="pill-btn zones-open-btn" hidden>🧭 分區・自動帶路</button>
     <aside id="zonesBox" class="glass-card">
-      <h3 id="zonesHeading">📍 校園分區視角</h3>
+      <div class="zones-box-head">
+        <h3 id="zonesHeading">📍 校園分區視角</h3>
+        <button type="button" id="zonesCollapseBtn" class="zones-collapse-btn" title="收合面板" aria-label="收合面板">✕</button>
+      </div>
       <div id="zoneList" class="zone-list"></div>
 
       <hr class="nav-divider">
@@ -148,6 +152,20 @@
     <!-- 圖片放大燈箱 -->
     <div id="photoLightbox" hidden>
       <img id="lightboxImg" src="" alt="實景照片放大">
+    </div>
+
+    <!-- 手機直式轉橫式提示遮罩 -->
+    <div id="portraitTipOverlay" hidden>
+      <div class="portrait-tip-card glass-card">
+        <div class="portrait-phone-anim" aria-hidden="true">📱</div>
+        <h2 id="portraitTipTitle">建議將手機轉為橫式瀏覽</h2>
+        <p id="portraitTipDesc">橫向畫面可同時顯示完整 3D 校園、路線導航與自動帶路控制列，操作更順手！</p>
+        <p id="portraitTipHint" class="portrait-tip-hint" hidden>請直接將手機橫放，系統將自動切換為橫式畫面。</p>
+        <div class="portrait-tip-actions">
+          <button type="button" id="portraitAutoRotateBtn" class="pill-btn active">🔄 切換全螢幕橫式</button>
+          <button type="button" id="portraitDismissBtn" class="pill-btn">仍以直式瀏覽</button>
+        </div>
+      </div>
     </div>
 
     <!-- 底部操作說明 -->

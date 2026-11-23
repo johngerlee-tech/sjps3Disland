@@ -12,7 +12,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
-  width: 100%; height: 100%;
+  width: 100%; height: 100%; height: 100dvh;
   overflow: hidden;
   font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
   color: var(--ink);
@@ -46,11 +46,13 @@ html, body {
 /* 頂部列 */
 #topHeader {
   position: absolute;
-  top: 12px; left: 14px; right: 14px;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: clamp(6px, 0.9vw, 10px);
   pointer-events: none;
   z-index: 20;
   flex-wrap: nowrap;
@@ -60,25 +62,26 @@ html, body {
 .brand-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: clamp(6px, 0.8vw, 10px);
+  padding: clamp(4px, 0.5vw, 6px) clamp(8px, 1vw, 12px);
   flex-shrink: 0;
 }
 .school-logo-img {
-  width: 38px; height: 38px;
+  width: clamp(30px, 2.8vw, 38px);
+  height: clamp(30px, 2.8vw, 38px);
   border-radius: 10px;
   object-fit: contain;
   background: #fff;
   padding: 2px;
 }
 .brand-text h1 {
-  font-size: 0.96rem;
+  font-size: clamp(0.78rem, 1.05vw, 0.96rem);
   font-weight: 800;
   line-height: 1.2;
 }
 .brand-text small {
   display: block;
-  font-size: 0.72rem;
+  font-size: clamp(0.64rem, 0.8vw, 0.72rem);
   color: var(--ink-sub);
   margin-top: 2px;
 }
@@ -86,10 +89,11 @@ html, body {
 .top-tools {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: clamp(4px, 0.5vw, 6px);
   flex-wrap: nowrap;
   margin-left: auto;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .pill-btn {
@@ -97,9 +101,9 @@ html, body {
   background: var(--glass-bg);
   backdrop-filter: blur(10px);
   color: var(--ink);
-  font-size: 0.8rem;
+  font-size: clamp(0.72rem, 0.88vw, 0.8rem);
   font-weight: 700;
-  padding: 7px 11px;
+  padding: clamp(5px, 0.55vw, 7px) clamp(8px, 0.9vw, 11px);
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
@@ -212,18 +216,49 @@ html, body {
 /* 左側分區導覽與路線規劃面板 */
 #zonesBox {
   position: absolute;
-  top: 84px; left: 14px;
-  width: 224px;
+  top: 80px;
+  left: max(12px, env(safe-area-inset-left));
+  width: clamp(200px, 19vw, 228px);
   padding: 12px;
-  z-index: 18;
-  max-height: calc(100vh - 150px);
+  z-index: 22;
+  max-height: calc(100dvh - 132px);
   overflow-y: auto;
 }
-#zonesBox h3 {
-  font-size: 0.84rem;
-  color: var(--ink-sub);
+#zonesBox.collapsed { display: none; }
+.zones-box-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   margin-bottom: 8px;
 }
+#zonesBox h3 {
+  font-size: clamp(0.78rem, 0.95vw, 0.84rem);
+  color: var(--ink-sub);
+  margin-bottom: 6px;
+}
+.zones-box-head h3 { margin-bottom: 0; }
+.zones-collapse-btn {
+  border: none;
+  background: rgba(148, 163, 184, 0.24);
+  color: var(--ink);
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.zones-collapse-btn:hover { background: rgba(148, 163, 184, 0.42); }
+.zones-open-btn {
+  position: absolute;
+  top: 80px;
+  left: max(12px, env(safe-area-inset-left));
+  z-index: 22;
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(22, 128, 73, 0.38);
+}
+.zones-open-btn[hidden] { display: none; }
 .nav-divider {
   border: none;
   border-top: 1px solid rgba(148, 163, 184, 0.35);
@@ -598,16 +633,167 @@ html, body {
   z-index: 16;
 }
 
+@media (max-width: 1180px) {
+  #topHeader {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .search-box {
+    flex: 1 1 200px;
+    min-width: 150px;
+    max-width: 320px;
+  }
+  .top-tools {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    justify-content: flex-start;
+  }
+  .top-tools::-webkit-scrollbar { display: none; }
+  #zonesBox, .zones-open-btn { top: 104px; max-height: calc(100dvh - 154px); }
+  #compassBox, #detailDrawer { top: 104px; max-height: calc(100dvh - 154px); }
+  #detailDrawer { width: min(320px, 42vw); }
+}
+
 @media (max-width: 768px) {
-  #zonesBox { display: none; }
-  #compassBox { top: auto; bottom: 52px; right: 10px; padding: 6px; }
+  .brand-text small { display: none; }
+  #zonesBox {
+    width: min(268px, 82vw);
+    max-height: calc(100dvh - 150px);
+  }
+  #compassBox { top: auto; bottom: max(46px, calc(38px + env(safe-area-inset-bottom))); right: 10px; padding: 6px; }
+  #compassResetBtn { width: 46px; height: 46px; }
   #detailDrawer {
     top: auto; bottom: 0; left: 0; right: 0;
-    width: 100%; max-height: 55vh;
+    width: 100%; max-height: 54dvh;
     border-radius: 18px 18px 0 0;
+    padding: 14px 14px max(16px, env(safe-area-inset-bottom));
   }
-  #campusFooter { font-size: 0.68rem; max-width: 94vw; overflow: hidden; text-overflow: ellipsis; }
+  #guideControlBar {
+    min-width: 0;
+    width: min(560px, 94vw);
+    bottom: max(42px, calc(36px + env(safe-area-inset-bottom)));
+  }
+  .guide-bar-inner { flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
+  #tourControlBar, #walkHudBar {
+    bottom: max(42px, calc(36px + env(safe-area-inset-bottom)));
+    padding: 8px 10px;
+  }
+  #campusFooter {
+    font-size: 0.66rem;
+    max-width: 94vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    bottom: max(6px, env(safe-area-inset-bottom));
+  }
   #minimapWrap { display: none; }
+}
+
+/* 手機橫式等矮螢幕最佳化 */
+@media (max-height: 540px) {
+  #topHeader {
+    top: 6px;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+  .brand-card { padding: 4px 8px; gap: 6px; }
+  .school-logo-img { width: 28px; height: 28px; }
+  .brand-text h1 { font-size: 0.74rem; max-width: 165px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brand-text small { display: none; }
+  .search-box { flex: 0 1 180px; min-width: 120px; }
+  .search-input-wrap { padding: 4px 9px; }
+  .search-input-wrap input { font-size: 0.74rem; }
+  .top-tools { width: auto; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
+  .top-tools::-webkit-scrollbar { display: none; }
+  .pill-btn { font-size: 0.7rem; padding: 5px 8px; }
+  #zonesBox, .zones-open-btn {
+    top: 48px;
+    max-height: calc(100dvh - 58px);
+  }
+  #zonesBox { width: min(236px, 44vw); padding: 9px; }
+  #compassBox { top: 48px; bottom: auto; right: 10px; padding: 5px; }
+  #compassResetBtn { width: 42px; height: 42px; }
+  .compass-cap { display: none; }
+  #detailDrawer {
+    top: 48px; bottom: 8px; left: auto; right: 10px;
+    width: min(320px, 46vw);
+    max-height: calc(100dvh - 56px);
+    border-radius: 16px;
+    padding: 12px;
+  }
+  #guideControlBar, #tourControlBar, #walkHudBar {
+    bottom: 8px;
+    min-width: 0;
+    width: min(560px, 92vw);
+  }
+  .guide-bar-inner { padding: 7px 10px; gap: 8px; }
+  .guide-route-title { font-size: 0.8rem; }
+  .guide-route-meta { font-size: 0.68rem; }
+  .guide-btn { font-size: 0.7rem; padding: 4px 8px; }
+  #campusFooter { display: none; }
+}
+
+/* 手機直式轉橫式提示遮罩 */
+#portraitTipOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.74);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1200;
+}
+#portraitTipOverlay[hidden] { display: none; }
+.portrait-tip-card {
+  width: min(340px, 92vw);
+  padding: 24px 20px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.96);
+}
+.portrait-phone-anim {
+  font-size: 2.6rem;
+  display: inline-block;
+  margin-bottom: 10px;
+  animation: rotatePhoneHint 2.2s ease-in-out infinite;
+}
+@keyframes rotatePhoneHint {
+  0%, 20% { transform: rotate(0deg); }
+  50%, 75% { transform: rotate(-90deg); }
+  100% { transform: rotate(0deg); }
+}
+.portrait-tip-card h2 {
+  font-size: 1.06rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--ink);
+}
+.portrait-tip-card p {
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: var(--ink-sub);
+  margin-bottom: 14px;
+}
+.portrait-tip-hint {
+  background: #fef3c7;
+  color: #92400e !important;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 0.78rem !important;
+  font-weight: 700;
+}
+.portrait-tip-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.portrait-tip-actions .pill-btn {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 0.86rem;
 }
 
 /* 載入畫面 */
