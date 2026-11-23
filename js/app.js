@@ -699,8 +699,14 @@
   function getSearchDronePose(b, hit) {
     const navNodesObj = D.navNodes || {};
     const floorBaseY = hit && hit.fk === "2" ? (b.floorHeight || 3.6) : 0;
+    const rotY = b.rotY || 0;
+    const cosR = Math.cos(rotY), sinR = Math.sin(rotY);
+    const toWorld = (lx, lz) => ({
+      x: b.x + lx * cosR + lz * sinR,
+      z: b.z - lx * sinR + lz * cosR
+    });
 
-    // 1. 若搜尋特定教室／空間，優先精準對齊該教室門牌與正前方走廊中景
+    // 1. 若搜尋特定教室／空間，精準對齊該教室門牌與正前方中景
     if (hit && (hit.code || hit.fk)) {
       const cleanName = String(hit.label || "").replace(hit.code || "", "").trim();
       const matchedRoom = (D.roomNavTargets || []).find(r =>
@@ -711,13 +717,12 @@
       if (matchedRoom && Array.isArray(nd) && nd.length >= 2) {
         const ndX = nd[0], ndZ = nd[1];
         const yBase = matchedRoom.is2F ? (b.floorHeight || 3.6) : 0;
-        const yaw = typeof matchedRoom.facingYaw === "number" ? matchedRoom.facingYaw : (b.rotY || 0);
-        const standDist = 3.1;
-        // facingYaw 為面對門牌方向，攝影機退至門前 standDist 公尺、離樓地板約 2.0m 高懸停
-        const camX = ndX + Math.sin(yaw) * standDist * 0.45;
-        const camZ = ndZ + Math.cos(yaw) * standDist * 0.45;
-        const tgtX = ndX - Math.sin(yaw) * 1.8;
-        const tgtZ = ndZ - Math.cos(yaw) * 1.8;
+        const yaw = typeof matchedRoom.facingYaw === "number" ? matchedRoom.facingYaw : rotY;
+        // 停於走廊中心偏外緣、離樓地板約 2.0m 高，正對門牌不退撞背後柱列
+        const camX = ndX + Math.sin(yaw) * 0.35;
+        const camZ = ndZ + Math.cos(yaw) * 0.35;
+        const tgtX = ndX - Math.sin(yaw) * 2.1;
+        const tgtZ = ndZ - Math.cos(yaw) * 2.1;
         return {
           target: new THREE.Vector3(tgtX, yBase + 1.85, tgtZ),
           endCam: new THREE.Vector3(camX, yBase + 2.0, camZ),
@@ -725,26 +730,94 @@
           highDist: 16
         };
       }
+
+      // 依樓層房間清單索引推算教室門面與正前方懸停位置（涵蓋所有未列於選單的教室）
+      const floorRooms = (b.floorsData && hit.fk && b.floorsData[hit.fk]) || [];
+      const rIdx = floorRooms.findIndex(r => r.code === hit.code);
+      if (rIdx >= 0 && floorRooms.length > 0) {
+        const frac = floorRooms.length === 1 ? 0 : (rIdx + 0.5) / floorRooms.length - 0.5;
+        let tLoc, cLoc;
+        if (b.id === "bldg_c") {
+          const spanZ = Math.max(4, (b.d || 18) - 3.6);
+          const lz = frac * spanZ;
+          tLoc = toWorld(-(b.w || 12) / 2 + 3.1, lz);
+          cLoc = toWorld(-(b.w || 12) / 2 - 2.6, lz);
+        } else if (b.id === "bldg_d") {
+          const spanZ = Math.max(4, (b.d || 18) - 4.2);
+          const lz = -1.0 + frac * spanZ;
+          tLoc = toWorld((b.w || 12) / 2 - 3.1, lz);
+          cLoc = toWorld((b.w || 12) / 2 + 2.6, lz);
+        } else {
+          const spanX = Math.max(6, (b.w || 30) - 6.0);
+          const lx = frac * spanX;
+          tLoc = toWorld(lx, (b.d || 12) / 2 - 3.1);
+          cLoc = toWorld(lx, (b.d || 12) / 2 + 2.6);
+        }
+        const poseRes = {
+          target: new THREE.Vector3(tLoc.x, floorBaseY + 1.85, tLoc.z),
+          endCam: new THREE.Vector3(cLoc.x, floorBaseY + 2.0, cLoc.z),
+          highHeight: floorBaseY + 22,
+          highDist: 16
+        };
+        // 若外廊外緣有樓梯牆或柱體遮擋，自動拉近至走廊內側淨空處正對教室門牌
+        if (typeof built !== "undefined" && built && built.clickableMeshes) {
+          const rRay = new THREE.Raycaster();
+          const rDir = new THREE.Vector3().subVectors(poseRes.target, poseRes.endCam);
+          const rDist = rDir.length();
+          rRay.set(poseRes.endCam, rDir.normalize());
+          rRay.near = 0.2;
+          rRay.far = Math.max(0.3, rDist - 1.2);
+          const rHits = rRay.intersectObjects(built.clickableMeshes, false).filter(h => h.object.userData && h.object.userData.isBuildingBody);
+          if (rHits.length > 0) {
+            poseRes.endCam.lerpVectors(poseRes.target, poseRes.endCam, 0.36);
+            poseRes.endCam.y = floorBaseY + 2.0;
+          }
+        }
+        return poseRes;
+      }
     }
 
-    // 2. 建築／場域搜尋：依建築朝向判斷正前方，並依尺寸自動決定中景或遠景距離
-    const rotY = b.rotY || 0;
-    let fx = Math.sin(rotY), fz = Math.cos(rotY);
+    // 2. 建築／場域搜尋：依建築朝向判斷正前方，並依尺寸與前方淨空自動決定最適中景／遠景
+    let fx = sinR, fz = cosR;
+    let faceOffset = (b.d || 8) * 0.45;
     if (b.id === "bldg_d") {
-      fx = Math.cos(rotY); fz = -Math.sin(rotY);
+      fx = cosR; fz = -sinR;
+      faceOffset = (b.w || 8) * 0.45;
     } else if (b.id === "bldg_c") {
-      fx = -Math.cos(rotY); fz = Math.sin(rotY);
+      fx = -cosR; fz = sinR;
+      faceOffset = (b.w || 8) * 0.45;
     }
     const maxDim = Math.max(b.w || 8, b.d || 8);
-    const hoverDist = maxDim <= 10
+    let hoverDist = maxDim <= 10
       ? Math.max(8.5, maxDim * 1.35)
-      : Math.min(34, Math.max(15, maxDim * 0.78));
-    const targetY = floorBaseY + Math.min(2.6, Math.max(1.6, (b.floorHeight || b.h || 3.4) * 0.5));
+      : Math.min(32, Math.max(15, maxDim * 0.72));
+    const targetY = floorBaseY + Math.min(2.6, Math.max(1.5, (b.floorHeight || b.h || 3.4) * 0.48));
+    const startOff = Math.min(faceOffset, 1.5);
+    const tgtPos = new THREE.Vector3(b.x + fx * startOff, targetY, b.z + fz * startOff);
+
+    // 射線淨空檢測：若正前方懸停位置被其他建築（例如 B棟、彩繪地坪前方的 A棟）遮蔽，自動縮短至遮蔽物前方的淨空位置
+    if (typeof built !== "undefined" && built && built.clickableMeshes) {
+      const clearRay = new THREE.Raycaster();
+      const outDir = new THREE.Vector3(fx, 0, fz).normalize();
+      const rayStart = new THREE.Vector3(b.x + fx * startOff, floorBaseY + 2.0, b.z + fz * startOff);
+      clearRay.set(rayStart, outDir);
+      clearRay.near = 0.3;
+      clearRay.far = hoverDist;
+      const obsHits = clearRay.intersectObjects(built.clickableMeshes, false);
+      for (let oi = 0; oi < obsHits.length; oi++) {
+        const ud = obsHits[oi].object.userData || {};
+        if (ud.isBuildingBody && ud.buildingId !== b.id) {
+          hoverDist = Math.max(startOff + 3.2, startOff + obsHits[oi].distance - 2.6);
+          break;
+        }
+      }
+    }
+
     return {
-      target: new THREE.Vector3(b.x, targetY, b.z),
+      target: tgtPos,
       endCam: new THREE.Vector3(b.x + fx * hoverDist, floorBaseY + 2.0, b.z + fz * hoverDist),
-      highHeight: floorBaseY + Math.max(24, hoverDist * 1.05),
-      highDist: Math.max(20, hoverDist * 1.25)
+      highHeight: floorBaseY + Math.max(22, hoverDist * 0.95),
+      highDist: Math.max(18, hoverDist * 1.15)
     };
   }
 
