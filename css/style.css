@@ -748,6 +748,9 @@ html, body {
   z-index: 1200;
 }
 #portraitTipOverlay[hidden] { display: none; }
+@media (orientation: landscape) {
+  #portraitTipOverlay { display: none !important; }
+}
 .portrait-tip-card {
   width: min(340px, 92vw);
   padding: 24px 20px;

@@ -2149,12 +2149,45 @@
   const portraitHintEl = document.getElementById("portraitTipHint");
   const portraitAutoBtnEl = document.getElementById("portraitAutoRotateBtn");
   const portraitDismissBtnEl = document.getElementById("portraitDismissBtn");
+  const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isInAppBrowser = /FBAN|FBAV|FB_IAB|Instagram|Line\//i.test(navigator.userAgent);
+  const portraitMql = window.matchMedia ? window.matchMedia("(orientation: portrait)") : null;
+
+  function isCurrentlyPortrait() {
+    if (portraitMql) return portraitMql.matches;
+    return window.innerHeight > window.innerWidth;
+  }
 
   function updatePortraitTip() {
     if (!portraitOverlayEl) return;
-    const isPhonePortrait = window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+    const isPhonePortrait = Math.min(window.innerWidth, window.innerHeight) < 768 && isCurrentlyPortrait();
     portraitOverlayEl.hidden = !(isPhonePortrait && !portraitTipDismissed);
   }
+
+  if (isInAppBrowser) {
+    if (portraitAutoBtnEl && !isIOSDevice) {
+      portraitAutoBtnEl.textContent = lang === "en" ? "🌐 Open in External Browser" : "🌐 改用外部瀏覽器開啟";
+    } else if (portraitAutoBtnEl) {
+      portraitAutoBtnEl.style.display = "none";
+    }
+    if (portraitHintEl) {
+      portraitHintEl.textContent = isIOSDevice
+        ? "偵測到您正在使用 Facebook / LINE 內建瀏覽器（系統限制無法橫轉）：請點選畫面「⋯」→「在瀏覽器中開啟（Safari）」，即可橫放手機瀏覽！"
+        : "偵測到您正在使用 Facebook / LINE 內建瀏覽器：建議點選右上角「⋯」→「在外部瀏覽器開啟」，橫向瀏覽更流暢！";
+      portraitHintEl.hidden = false;
+    }
+  } else if (isIOSDevice && portraitAutoBtnEl) {
+    // iOS Safari 不允許網頁程式鎖定螢幕方向，改顯示清楚的 iPhone 操作指引
+    portraitAutoBtnEl.style.display = "none";
+    if (portraitHintEl) {
+      portraitHintEl.textContent = lang === "en"
+        ? "On iPhone: turn off Portrait Orientation Lock 🔒 in Control Center and rotate sideways."
+        : "iPhone 使用提醒：請確認關閉控制中心「直向鎖定 🔒」後橫放手機即可橫向翻轉 📱↻";
+      portraitHintEl.hidden = false;
+    }
+  }
+
   if (portraitDismissBtnEl) {
     portraitDismissBtnEl.onclick = () => {
       portraitTipDismissed = true;
@@ -2163,6 +2196,11 @@
   }
   if (portraitAutoBtnEl) {
     portraitAutoBtnEl.onclick = async () => {
+      if (isInAppBrowser && !isIOSDevice) {
+        const rawUrl = window.location.href.replace(/^https?:\/\//i, "");
+        window.location.href = `intent://${rawUrl}#Intent;scheme=https;package=com.android.chrome;end`;
+        return;
+      }
       try {
         if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
           await document.documentElement.requestFullscreen();
@@ -2175,8 +2213,8 @@
       } catch (e) { /* 瀏覽器不支援自動鎖定橫式時顯示提示 */ }
       if (portraitHintEl) {
         portraitHintEl.textContent = lang === "en"
-          ? "Please turn your phone sideways to switch to landscape mode."
-          : "您的瀏覽器不支援自動旋轉，請直接將手機橫放即可切換為橫式畫面 📱↻";
+          ? "Please turn your phone sideways (and disable Orientation Lock) to switch to landscape mode."
+          : "請確認已關閉手機「直向鎖定 🔒」，再將手機橫放即可自動切換為橫式畫面 📱↻";
         portraitHintEl.hidden = false;
       }
     };
@@ -2184,14 +2222,25 @@
   updatePortraitTip();
 
   function handleViewportResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const w = window.visualViewport ? Math.round(window.visualViewport.width) : window.innerWidth;
+    const h = window.visualViewport ? Math.round(window.visualViewport.height) : window.innerHeight;
+    if (w > 0 && h > 0) {
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    }
     updatePortraitTip();
   }
   window.addEventListener("resize", handleViewportResize);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", handleViewportResize);
+  }
+  if (portraitMql && portraitMql.addEventListener) {
+    portraitMql.addEventListener("change", () => setTimeout(handleViewportResize, 80));
+  }
   window.addEventListener("orientationchange", () => {
-    setTimeout(handleViewportResize, 120);
+    setTimeout(handleViewportResize, 100);
+    setTimeout(handleViewportResize, 350);
   });
 
   // --- 7. 小地圖 (Minimap) ---
