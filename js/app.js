@@ -61,6 +61,7 @@
   };
   let flyAnim = null;
   let droneSearchAnim = null;
+  let searchViewActive = false;
   let targetFov = 44;
 
   function setTargetFov(fov) {
@@ -95,6 +96,7 @@
 
   function flyTo(targetArr, camPosArr, durationMs = 750) {
     droneSearchAnim = null;
+    searchViewActive = false;
     targetFov = 44;
     const startTarget = camState.target.clone();
     const startYaw = camState.yaw;
@@ -503,7 +505,8 @@
       labelEls.push({
         el,
         b,
-        pos: new THREE.Vector3(b.x, b.floors * b.floorHeight + 2.0, b.z)
+        pos: new THREE.Vector3(b.x, b.floors * b.floorHeight + 2.0, b.z),
+        bodyPos: new THREE.Vector3(b.x, Math.min(2.6, Math.max(1.0, (b.floors * b.floorHeight || 3.4) * 0.45)), b.z)
       });
     });
 
@@ -528,13 +531,49 @@
     });
   }
 
+  function isLabelLineOccluded(eyePos, targetPos, ownBid) {
+    if (!built || !built.clickableMeshes) return false;
+    const dir = new THREE.Vector3().subVectors(targetPos, eyePos);
+    const dist = dir.length();
+    if (dist <= 2.0) return false;
+    dir.divideScalar(dist);
+    camObsRay.set(eyePos, dir);
+    camObsRay.near = 0.5;
+    camObsRay.far = Math.max(0.6, dist - 1.2);
+    const hits = camObsRay.intersectObjects(built.clickableMeshes, false);
+    for (let hi = 0; hi < hits.length; hi++) {
+      const ho = hits[hi].object;
+      const ud = ho.userData || {};
+      if (ownBid && ud.buildingId === ownBid) continue;
+      // 忽略低矮地面鋪面（如跑道、地坪）與半透明玻璃/網室
+      if (hits[hi].point && hits[hi].point.y < 0.35 && !ud.isBuildingBody) continue;
+      const mat = Array.isArray(ho.material) ? ho.material[0] : ho.material;
+      if (mat && mat.transparent && mat.opacity < 0.85) continue;
+      return true;
+    }
+    return false;
+  }
+
   function updateLabels() {
     const w = window.innerWidth, h = window.innerHeight;
     const v = new THREE.Vector3();
     const isGuiding = !!(walkMode && guidedWalk);
     const walking = walkMode && !guidedWalk;
+    const nowT = performance.now();
+    const hideAmbient = searchViewActive || tourActive;
+    const selB = (searchViewActive || tourActive) && selectedBuildingId
+      ? D.buildings.find(item => item.id === selectedBuildingId)
+      : null;
+    const selCamDist = selB
+      ? camera.position.distanceTo(new THREE.Vector3(selB.x, 1.8, selB.z)) + Math.max(selB.w || 0, selB.d || 0) * 0.45
+      : Infinity;
+
     for (let i = 0; i < labelEls.length; i++) {
       const item = labelEls[i];
+      if (!walking && !isGuiding && hideAmbient && item.isAmbient) {
+        item.el.style.display = "none";
+        continue;
+      }
       if (walking || isGuiding) {
         if (item.isAmbient || !item.b) {
           item.el.style.display = "none";
@@ -551,35 +590,35 @@
           continue;
         }
       }
+      // 搜尋定格或特色導覽時：僅保留目標主體與視距內前方建物，遠方背景建物字牌自動隱藏以免干擾
+      if ((searchViewActive || tourActive) && item.b && selB && item.b.id !== selB.id) {
+        const bDist = camera.position.distanceTo(item.bodyPos || item.pos);
+        if (bDist > selCamDist + 8) {
+          item.el.style.display = "none";
+          continue;
+        }
+      }
       v.copy(item.pos).project(camera);
-      if (v.z > 1 || ((isGuiding || tourActive) && (Math.abs(v.x) > 0.92 || Math.abs(v.y) > 0.92))) {
+      const edgeLimit = (isGuiding || tourActive || searchViewActive) ? 0.90 : 1.02;
+      if (v.z > 1 || Math.abs(v.x) > edgeLimit || Math.abs(v.y) > edgeLimit) {
         item.el.style.display = "none";
       } else {
-        const checkGuideOcclude = isGuiding && item.b && !(guidedWalk.endBid && item.b.id === guidedWalk.endBid);
-        const checkTourOcclude = tourActive && item.b && !(selectedBuildingId && item.b.id === selectedBuildingId);
-        if (checkGuideOcclude || checkTourOcclude) {
-          // 自動帶路或特色導覽時：檢測視線是否被建築主體遮擋，看不到就隱藏浮動字卡
-          const eyePos = isGuiding
-            ? new THREE.Vector3(walkState.x, walkState.y + 1.5, walkState.z)
-            : camera.position;
-          const dir = new THREE.Vector3().subVectors(item.pos, eyePos);
-          const dist = dir.length();
-          let occluded = false;
-          if (dist > 2.0 && built && built.clickableMeshes) {
-            dir.divideScalar(dist);
-            camObsRay.set(eyePos, dir);
-            camObsRay.near = 0.5;
-            camObsRay.far = Math.max(0.6, dist - 2.0);
-            const hits = camObsRay.intersectObjects(built.clickableMeshes, false);
-            for (let hi = 0; hi < hits.length; hi++) {
-              const ho = hits[hi].object;
-              if (ho.userData && ho.userData.isBuildingBody && ho.userData.buildingId !== item.b.id) {
-                occluded = true;
-                break;
-              }
+        const isGuideDest = isGuiding && item.b && guidedWalk.endBid && item.b.id === guidedWalk.endBid;
+        if (!isGuideDest && built && built.clickableMeshes) {
+          // 所有模式：同時檢查標籤位置與建物本體是否被任何遮蔽物（牆、柱、頂棚、屋頂）擋住；節流 150ms 維持效能
+          if (!item.occT || nowT - item.occT > 150) {
+            item.occT = nowT;
+            const eyePos = isGuiding
+              ? new THREE.Vector3(walkState.x, walkState.y + 1.5, walkState.z)
+              : camera.position;
+            const ownBid = item.b ? item.b.id : null;
+            let occluded = isLabelLineOccluded(eyePos, item.pos, ownBid);
+            if (!occluded && (searchViewActive || tourActive || isGuiding) && item.bodyPos && item.b && (!selB || item.b.id !== selB.id)) {
+              occluded = isLabelLineOccluded(eyePos, item.bodyPos, ownBid);
             }
+            item.occ = occluded;
           }
-          if (occluded) {
+          if (item.occ) {
             item.el.style.display = "none";
             continue;
           }
@@ -743,7 +782,127 @@
       return false;
     }
 
-    // 1. 若搜尋特定教室／空間：停在走廊外側中景，正對教室門窗與班級牌，遇柱體遮蔽自動左右微偏
+    // 嚴格視線檢測：任何不透明實體（柱、牆、屋簷、女兒牆、欄杆）擋在攝影機與目標之間即視為遮蔽
+    function isSightBlockedStrict(camPos, tgtPos, nearTargetTol) {
+      if (!testRay) return false;
+      const dir = new THREE.Vector3().subVectors(tgtPos, camPos);
+      const dist = dir.length();
+      if (dist < 0.5) return false;
+      dir.divideScalar(dist);
+      testRay.set(camPos, dir);
+      testRay.near = 0.2;
+      testRay.far = Math.max(0.3, dist - nearTargetTol);
+      const hits = testRay.intersectObjects(built.clickableMeshes, false);
+      for (let i = 0; i < hits.length; i++) {
+        const mat = hits[i].object.material;
+        const m0 = Array.isArray(mat) ? mat[0] : mat;
+        if (m0 && m0.transparent && m0.opacity < 0.9) continue;
+        return true;
+      }
+      return false;
+    }
+
+    // A. 教室／空間：直接定位 3D 場景中的實際班級牌，計算門窗中心與牆面法線，正對班級牌置中構圖
+    if (hit && hit.code !== null && hit.fk && hasMeshList && built.buildingGroups && built.buildingGroups[b.id]) {
+      const wantY = hit.fk === "2" ? (b.floorHeight || 3.6) : 0;
+      const code = String(hit.code || "").trim();
+      const nm = String(hit.label || "").replace(code, "").trim();
+      let plaque = null, bestScore = 0;
+      const searchGroup = (b.id === "bldg_a" && code === "Wc 2" && built.buildingGroups["tennis_toilet"])
+        ? built.buildingGroups["tennis_toilet"]
+        : built.buildingGroups[b.id];
+      const plaqueBid = (b.id === "bldg_a" && code === "Wc 2" && built.buildingGroups["tennis_toilet"]) ? "tennis_toilet" : b.id;
+      searchGroup.traverse(o => {
+        const rp = o.userData && o.userData.roomPlaque;
+        if (!rp || Math.abs(rp.floorY - wantY) > 0.5) return;
+        let s = 0;
+        if (code && rp.code === code) s = 4;
+        else if (code && rp.code && (rp.code.includes(code) || code.includes(rp.code))) s = 3;
+        else if (nm && rp.name && (rp.name.includes(nm) || nm.includes(rp.name))) s = 2;
+        else if (code && rp.name && rp.name.includes(code)) s = 1;
+        if (s > bestScore) { bestScore = s; plaque = o; }
+      });
+
+      if (plaque) {
+        const rp = plaque.userData.roomPlaque;
+        plaque.parent.updateMatrixWorld(true);
+        const yBase = rp.floorY;
+        const is2FRoom = yBase > 0.5;
+        const frame = plaque.parent.localToWorld(new THREE.Vector3(rp.frameLocal[0], yBase + 1.7, rp.frameLocal[1]));
+        const plaquePos = plaque.getWorldPosition(new THREE.Vector3());
+        const q = plaque.parent.getWorldQuaternion(new THREE.Quaternion());
+        const n = new THREE.Vector3(rp.normal[0], 0, rp.normal[1]).applyQuaternion(q);
+        n.y = 0; n.normalize();
+        const lat = new THREE.Vector3(n.z, 0, -n.x);
+        // 1F：離地 1.0m；2F：離地約 7.0m 越過女兒牆，以中景正對班級牌
+        const camY = is2FRoom ? 7.0 : 1.0;
+        const distList = is2FRoom ? [7.5, 6.6, 8.6, 5.8, 9.8] : [6.4, 5.6, 7.4, 4.8, 4.1, 3.5];
+        const latList = [0, 0.8, -0.8, 1.6, -1.6, 2.4, -2.4, 3.2, -3.2, 4.2, -4.2];
+        const probeL = frame.clone().addScaledVector(lat, 1.1);
+        const probeR = frame.clone().addScaledVector(lat, -1.1);
+        let camPos = null;
+        for (let pass = 0; pass < 2 && !camPos; pass++) {
+          for (let di = 0; di < distList.length && !camPos; di++) {
+            for (let li = 0; li < latList.length; li++) {
+              const c = frame.clone().addScaledVector(n, distList[di]).addScaledVector(lat, latList[li]);
+              c.y = camY;
+              const ok = pass === 0
+                ? (!isSightBlockedStrict(c, frame, 0.45) && !isSightBlockedStrict(c, plaquePos, 0.3) &&
+                   !isSightBlockedStrict(c, probeL, 0.45) && !isSightBlockedStrict(c, probeR, 0.45))
+                : (!isSightBlocked(c, frame, plaqueBid, 1.0) && !isSightBlocked(c, plaquePos, plaqueBid, 0.8));
+              if (ok) { camPos = c; break; }
+            }
+          }
+        }
+        if (!camPos) {
+          camPos = frame.clone().addScaledVector(n, distList[0]);
+          camPos.y = camY;
+        }
+        return {
+          target: frame,
+          endCam: camPos,
+          highHeight: yBase + 28,
+          highDist: 22,
+          fov: is2FRoom ? 44 : 52
+        };
+      }
+    }
+
+    // B. 特定設施正面定義（依 3D 模型實際正面）：彩繪牆壁畫朝西、菜園入口與告示海報朝西（面向 C 棟）、廚房羅馬柱正門朝南、光電球場與 2F 同高 (7m) 俯視球場鋪面
+    const FACADES = {
+      samba_wall: { lx: (b.w || 6.2) / 2 - 0.35, lz: -1.55, y: 2.2, camY: 1.0, nx: -1, nz: 0, dists: [12.5, 11, 9.5, 14, 8], fov: 56 },
+      green_garden: { lx: -(b.w || 12.8) / 2 - 0.1, lz: 0, y: 1.5, camY: 1.0, nx: -1, nz: 0, dists: [10, 8.6, 11.5, 7.2, 6], fov: 56 },
+      kitchen: { lx: 0, lz: (b.d || 15.5) / 2 + 1.4, y: 2.0, camY: 1.0, nx: 0, nz: 1, dists: [15, 13, 17, 11, 9], fov: 56 },
+      solar_court: { lx: 0, lz: 2.0, y: 1.6, camY: 7.0, nx: 0, nz: 1, dists: [36, 32, 40, 28], fov: 56 }
+    };
+    const fc = !hit.code ? FACADES[b.id] : null;
+    if (fc) {
+      const fTgtW = toWorld(fc.lx, fc.lz);
+      const fTgt = new THREE.Vector3(fTgtW.x, fc.y, fTgtW.z);
+      const fnx = fc.nx * cosR + fc.nz * sinR;
+      const fnz = -fc.nx * sinR + fc.nz * cosR;
+      const fLatX = fnz, fLatZ = -fnx;
+      const fCamY = fc.camY || 1.0;
+      let fCam = null;
+      const fLats = [0, 1.2, -1.2, 2.4, -2.4, 3.6, -3.6];
+      for (let di = 0; di < fc.dists.length && !fCam; di++) {
+        for (let li = 0; li < fLats.length; li++) {
+          const c = new THREE.Vector3(
+            fTgt.x + fnx * fc.dists[di] + fLatX * fLats[li], fCamY,
+            fTgt.z + fnz * fc.dists[di] + fLatZ * fLats[li]
+          );
+          if (!isSightBlocked(c, fTgt, b.id, 0.6)) { fCam = c; break; }
+        }
+      }
+      if (!fCam) fCam = new THREE.Vector3(fTgt.x + fnx * fc.dists[0], fCamY, fTgt.z + fnz * fc.dists[0]);
+      return {
+        target: fTgt,
+        endCam: fCam,
+        highHeight: Math.max(30, fc.dists[0] * 1.4),
+        highDist: Math.max(26, fc.dists[0] * 1.35),
+        fov: fc.fov || 56
+      };
+    }
     if (hit && (hit.code || hit.fk)) {
       const cleanName = String(hit.label || "").replace(hit.code || "", "").trim();
       const matchedRoom = (D.roomNavTargets || []).find(r =>
@@ -785,7 +944,7 @@
       }
 
       if (tgtX !== null) {
-        const roomCamY = yBase > 0.5 ? (yBase + 1.45) : 1.0;
+        const roomCamY = yBase > 0.5 ? 6.0 : 1.0;
         const tgtVec = new THREE.Vector3(tgtX, yBase + 1.75, tgtZ);
         // 優先嘗試中景距離（6.8m~5.4m，可同時看到班級牌與門窗），若被柱體遮擋則左右偏移避開柱子
         const distCandidates = [6.8, 5.8, 4.9, 8.0, 4.2, 3.4, 2.9];
@@ -818,23 +977,22 @@
       }
     }
 
-    // 2. 非教室設施／整棟校舍搜尋：廣角／中遠景呈現全貌，若正前方受其他建物遮蔽則自動改採無遮蔽側拍角度
+    // 2. 非教室設施／整棟校舍搜尋：依實際正面朝向（西側：菜園/彩繪牆/司令台/C棟；東側：D棟；南側：廚房/A/B棟等）
     let fx = sinR, fz = cosR;
-    let faceOffset = (b.d || 8) * 0.45;
+    let faceOffset = (b.d || 8) * 0.5;
     if (b.id === "bldg_d") {
       fx = cosR; fz = -sinR;
-      faceOffset = (b.w || 8) * 0.45;
-    } else if (b.id === "bldg_c") {
+      faceOffset = (b.w || 8) * 0.5;
+    } else if (b.id === "bldg_c" || b.id === "green_garden" || b.id === "samba_wall" || b.id === "stage_dream") {
       fx = -cosR; fz = sinR;
-      faceOffset = (b.w || 8) * 0.45;
+      faceOffset = (b.w || 8) * 0.5;
     }
     const maxDim = Math.max(b.w || 8, b.d || 8);
     const idealDist = maxDim <= 10
       ? Math.max(11.0, maxDim * 1.55)
       : Math.min(36, Math.max(18, maxDim * 0.82));
     const targetY = floorBaseY + Math.min(2.6, Math.max(1.5, (b.floorHeight || b.h || 3.4) * 0.48));
-    const startOff = Math.min(faceOffset, 1.5);
-    const tgtPos = new THREE.Vector3(b.x + fx * startOff, targetY, b.z + fz * startOff);
+    const tgtPos = new THREE.Vector3(b.x + fx * (faceOffset + 0.35), targetY, b.z + fz * (faceOffset + 0.35));
 
     const baseAngle = Math.atan2(fx, fz);
     const angleOffsetsDeg = [0, 26, -26, 38, -38, 52, -52];
@@ -845,9 +1003,9 @@
       const ang = baseAngle + (angleOffsetsDeg[ai] * Math.PI) / 180;
       const dx = Math.sin(ang), dz = Math.cos(ang);
       for (let si = 0; si < distScale.length; si++) {
-        const d = Math.max(faceOffset + 4.0, idealDist * distScale[si]);
+        const d = Math.max(faceOffset + 4.5, idealDist * distScale[si]);
         const cand = new THREE.Vector3(b.x + dx * d, hoverCamY, b.z + dz * d);
-        if (!isSightBlocked(cand, tgtPos, null, 0)) {
+        if (!isSightBlocked(cand, tgtPos, b.id, 0.8)) {
           chosenCam = cand;
           break;
         }
@@ -896,7 +1054,8 @@
     while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
 
     flyAnim = null;
-    targetFov = 56; // 廣角鏡頭呈現教室門窗或設施全貌
+    targetFov = pose.fov || 56; // 教室 2F 中景標準鏡頭、1F 中景、設施廣角呈現全貌
+    searchViewActive = true;
     droneSearchAnim = {
       t0: performance.now(),
       stage1Dur: 750,
@@ -922,7 +1081,22 @@
   searchInput.addEventListener("input", () => {
     const q = searchInput.value.trim().toLowerCase();
     if (!q) { currentSearchHits = []; searchResults.hidden = true; return; }
-    const hits = searchIndex.filter(item => item.keywords.includes(q)).slice(0, 10);
+    // 依相關度排序：名稱完全相符 > 名稱開頭相符 > 名稱包含 > 僅特色/別名關鍵字相符
+    const scoreHit = item => {
+      const lb = String(item.label || "").toLowerCase();
+      const lbEn = String(item.labelEn || "").toLowerCase();
+      const bare = lb.replace(String(item.code || "").toLowerCase(), "").trim();
+      if (lb === q || bare === q || lbEn === q) return 0;
+      if (bare.startsWith(q) || lb.startsWith(q)) return 1;
+      if (lb.includes(q) || lbEn.includes(q)) return 2;
+      return 3;
+    };
+    const hits = searchIndex
+      .filter(item => item.keywords.includes(q))
+      .map((item, i) => ({ item, s: scoreHit(item), i }))
+      .sort((a, b2) => a.s - b2.s || a.i - b2.i)
+      .slice(0, 10)
+      .map(x => x.item);
     currentSearchHits = hits;
     if (hits.length === 0) {
       searchResults.innerHTML = `<li style="cursor:default;color:#64748b;">${lang === "en" ? "No match found" : "找不到相符結果"}</li>`;
@@ -2173,6 +2347,7 @@
     if (detailDrawer) detailDrawer.hidden = true;
     document.body.classList.add("walking-active");
     targetFov = 44;
+    searchViewActive = false;
     walkMode = true;
     flyAnim = null;
     droneSearchAnim = null;
@@ -3289,6 +3464,7 @@
             document.getElementById("guideControlBar").hidden = true;
             // 保持人物站立於定點並轉向面對目的地門牌正面，鏡頭切換為人物背後清晰視角
             targetFov = 44;
+    searchViewActive = false;
     walkMode = true;
             walkFirstPerson = false;
             walkFollowDist = destIsRoom ? 3.25 : 6.5;

@@ -559,6 +559,16 @@
       );
       if (axis === "x") plaque.position.set(plaquePos, fy + 2.34, wallCoord + facingSign * 0.14);
       else plaque.position.set(wallCoord + facingSign * 0.14, fy + 2.34, plaquePos);
+      // 供搜尋功能精準定位班級牌：門窗構圖中心（門與窗中點）及牆面朝外法線（群組區域座標）
+      const doorRef = (doorPos !== undefined && doorPos !== null) ? doorPos : plaquePos;
+      const frameMid = (winPos !== undefined && winPos !== null) ? (doorRef + winPos) / 2 : plaquePos;
+      plaque.userData.roomPlaque = {
+        code: item.code || "",
+        name: item.name || "",
+        floorY: fy,
+        frameLocal: axis === "x" ? [frameMid, wallCoord + facingSign * 0.14] : [wallCoord + facingSign * 0.14, frameMid],
+        normal: axis === "x" ? [0, facingSign] : [facingSign, 0]
+      };
       group.add(plaque);
     }
 
@@ -610,8 +620,7 @@
         { code: "", name: "廁所", doorPos: 27.20, isWC: true }
       ];
       const f2Items = [
-        { code: "Wc 2", name: "性別友善廁所", doorPos: -30.95, plaquePos: -30.20, isWC: true },
-        { code: "201", name: "教具室", doorPos: -24.60, winPos: -22.20, winW: 2.4 },
+        { code: "201", name: "教具室", doorPos: -28.60, winPos: -24.60, winW: 2.8 },
         { code: "202-204", name: "辦公室", doorPos: -18.50, winPos: -14.80, winW: 3.6 },
         { code: "202-204", name: "辦公室", doorPos: -5.65, plaquePos: -11.20, winPos: -8.20, winW: 3.4 },
         { code: "205", name: "資訊教室(二)", doorPos: 8.20, winPos: 10.40, winW: 2.4 },
@@ -643,7 +652,7 @@
         { code: "201", name: "美勞教室", doorPos: -26.35, winPos: -29.30, winW: 2.8, boardPos: -31.20 },
         { code: "202", name: "社會教室", doorPos: -22.95, winPos: -20.00, winW: 2.8, boardPos: -18.10 },
         { code: "203", name: "英語教室", doorPos: -11.60, winPos: -14.55, winW: 2.8, boardPos: -16.45 },
-        { code: "204", name: "綜合教室(二)", doorPos: -8.20, winPos: -5.25, winW: 2.8, boardPos: -3.35 },
+        { code: "204", name: "綜合教室(一)", doorPos: -8.20, winPos: -5.25, winW: 2.8, boardPos: -3.35 },
         { code: "205", name: "E化教室", doorPos: 9.40, winPos: 11.60, winW: 2.5 }
       ];
       f1Items.forEach(it => addRoomBayElement(group, axis, wallCoord, facingSign, 0, it));
@@ -3103,10 +3112,17 @@
     door2F.position.set(0.35, fh + 1.10, wallFaceZ + 0.05);
     const plaque2F = new THREE.Mesh(
       new THREE.BoxGeometry(1.15, 0.30, 0.06),
-      createDoorPlaqueMaterial("Wc 2", "性別平等廁所")
+      createDoorPlaqueMaterial("Wc 2", "性別友善廁所")
     );
     plaque2F.position.set(0.35, fh + 2.48, wallFaceZ + 0.08);
     plaque2F.userData.isSign = true;
+    plaque2F.userData.roomPlaque = {
+      code: "Wc 2",
+      name: "性別友善廁所",
+      floorY: fh,
+      frameLocal: [0.35, wallFaceZ + 0.08],
+      normal: [0, 1]
+    };
     group.add(door2F, plaque2F);
 
     // 西側外牆面對操場之採光玻璃窗（1F + 2F）

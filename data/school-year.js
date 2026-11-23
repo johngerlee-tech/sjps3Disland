@@ -42,8 +42,7 @@ window.SCHOOL_YEAR_DATA = {
           { code: "205", name: "資訊教室(二)", nameEn: "Computer Lab 2 (A205)", type: "special" },
           { code: "206", name: "音樂教室", nameEn: "Music Room (A206)", type: "special" },
           { code: "207", name: "資訊教室(一)", nameEn: "Computer Lab 1 (A207)", type: "special" },
-          { code: "", name: "東側廁所", nameEn: "East Restroom (2F)", type: "common" },
-          { code: "201-203", name: "視聽教室", nameEn: "Audiovisual Hall", type: "special" }
+          { code: "", name: "東側廁所", nameEn: "East Restroom (2F)", type: "common" }
         ],
         B1: [
           { code: "B1", name: "防空避難室（不開放內部導覽）", nameEn: "Air-raid Shelter (Exterior only)", type: "common" }
@@ -79,7 +78,7 @@ window.SCHOOL_YEAR_DATA = {
           { code: "201", name: "美勞教室", nameEn: "Art Classroom", type: "special" },
           { code: "202", name: "社會教室", nameEn: "Social Studies Room", type: "special" },
           { code: "203", name: "英語教室", nameEn: "English Classroom", type: "special" },
-          { code: "204", name: "綜合教室(二)", nameEn: "Multi-purpose Room 2", type: "special" },
+          { code: "204", name: "綜合教室(一)", nameEn: "Multi-purpose Room 1", type: "special" },
           { code: "205", name: "E化教室", nameEn: "Smart Classroom", type: "special" },
           { code: "206-208", name: "圖書室", nameEn: "School Library", type: "special" }
         ]
