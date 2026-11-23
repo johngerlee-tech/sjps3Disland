@@ -595,6 +595,8 @@
       btn.onclick = () => {
         list.querySelectorAll(".zone-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
+        const ovBtn = document.getElementById("resetOverviewBtn");
+        if (ovBtn) ovBtn.classList.remove("active");
         const z = D.zones.find(item => item.id === btn.dataset.zid);
         if (walkMode) {
           exitWalkMode();
@@ -612,6 +614,9 @@
   const zonesBoxEl = document.getElementById("zonesBox");
   const zonesOpenBtnEl = document.getElementById("zonesOpenBtn");
   const zonesCollapseBtnEl = document.getElementById("zonesCollapseBtn");
+  function isCompactViewport() {
+    return window.innerWidth <= 1024 || window.innerHeight <= 540;
+  }
   function setZonesPanelOpen(open) {
     if (!zonesBoxEl || !zonesOpenBtnEl) return;
     zonesBoxEl.classList.toggle("collapsed", !open);
@@ -619,8 +624,10 @@
   }
   if (zonesOpenBtnEl) zonesOpenBtnEl.onclick = () => setZonesPanelOpen(true);
   if (zonesCollapseBtnEl) zonesCollapseBtnEl.onclick = () => setZonesPanelOpen(false);
-  if (window.innerWidth <= 900 || window.innerHeight <= 540) {
+  if (isCompactViewport()) {
     setZonesPanelOpen(false);
+  } else {
+    setZonesPanelOpen(true);
   }
 
   function refreshLanguageUI() {
@@ -744,6 +751,8 @@
     const b = D.buildings.find(item => item.id === hit.bid);
     if (!b) return;
     if (walkMode) exitWalkMode();
+    const overviewBtn = document.getElementById("resetOverviewBtn");
+    if (overviewBtn) overviewBtn.classList.remove("active");
     selectedBuildingId = hit.bid;
     if (detailDrawer) detailDrawer.hidden = true;
 
@@ -2019,11 +2028,21 @@
     if (!walkMode && zonesBoxEl) {
       zonesWasOpenBeforeWalk = !zonesBoxEl.classList.contains("collapsed");
     }
-    if (typeof setZonesPanelOpen === "function") setZonesPanelOpen(false);
+    // 電腦版保留左側分區導覽面板開啟，僅在手機或平板裝置時自動收合
+    if (isCompactViewport() && typeof setZonesPanelOpen === "function") {
+      setZonesPanelOpen(false);
+    }
     if (detailDrawer) detailDrawer.hidden = true;
     document.body.classList.add("walking-active");
     walkMode = true;
     flyAnim = null;
+    droneSearchAnim = null;
+    clickWalkTarget = null;
+    walkFirstPerson = false;
+    walkState.vy = 0;
+    walkState.jumping = false;
+    walkState.pitch = 0.20;
+    updateBuildingOcclusionOpacity(new Set(), 1.0);
     if (spawn) {
       walkState.x = spawn.x; walkState.z = spawn.z;
       walkState.y = typeof spawn.y === "number" ? spawn.y : getWalkElevation(spawn.x, spawn.z, 0);
@@ -2047,9 +2066,13 @@
     camState.pitch = 0.20;
     camState.dist = walkFollowDist;
     applyCamera();
+    const camModeBtn = document.getElementById("walkCamModeBtn");
+    if (camModeBtn) camModeBtn.textContent = lang === "en" ? "🎥 3rd Person" : "🎥 第三人稱";
     document.getElementById("walkHudBar").hidden = isMobileLayout();
     if (walkHudToggleBtnEl) walkHudToggleBtnEl.hidden = !isMobileLayout();
     document.getElementById("walkModeBtn").classList.add("active");
+    const overviewBtn = document.getElementById("resetOverviewBtn");
+    if (overviewBtn) overviewBtn.classList.remove("active");
     document.getElementById("walkJoystick").classList.add("visible");
     if (typeof syncMinimapVisibility === "function") syncMinimapVisibility();
     walkerGroup.visible = !walkFirstPerson;
@@ -2059,7 +2082,7 @@
     walkMode = false;
     guidedWalk = null;
     document.body.classList.remove("walking-active");
-    if (zonesWasOpenBeforeWalk && window.innerWidth > 900 && window.innerHeight > 540 && typeof setZonesPanelOpen === "function") {
+    if (zonesWasOpenBeforeWalk && !isCompactViewport() && typeof setZonesPanelOpen === "function") {
       setZonesPanelOpen(true);
     }
     autoOrbitActive = false;
@@ -2077,6 +2100,8 @@
     if (walkHudToggleBtnEl) walkHudToggleBtnEl.hidden = true;
     document.getElementById("guideControlBar").hidden = true;
     document.getElementById("walkModeBtn").classList.remove("active");
+    const overviewBtn = document.getElementById("resetOverviewBtn");
+    if (overviewBtn) overviewBtn.classList.add("active");
     document.getElementById("walkJoystick").classList.remove("visible");
     const miniWrap = document.getElementById("minimapWrap");
     if (miniWrap) miniWrap.classList.remove("visible");
@@ -2257,8 +2282,13 @@
   populateNavSelects();
   renderWalkSpawns();
 
+  const overviewBtnInit = document.getElementById("resetOverviewBtn");
+  if (overviewBtnInit) overviewBtnInit.classList.add("active");
+
   document.getElementById("resetOverviewBtn").onclick = () => {
     document.querySelectorAll("#zoneList .zone-btn").forEach(b => b.classList.remove("active"));
+    const overviewBtn = document.getElementById("resetOverviewBtn");
+    if (overviewBtn) overviewBtn.classList.add("active");
     if (walkMode) { exitWalkMode(); return; }
     const z0 = D.zones[0];
     flyTo(z0.target, z0.camPos, 700);
